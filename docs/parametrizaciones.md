@@ -7,7 +7,16 @@ Objetivo: fijar el “espacio de parámetros” para poder bajar y comparar sent
 - Nivel: Federal (MVP)
 - Extensión futura: CABA / Provincial (por provincia)
 
-## 2) Fuero (placeholder)
+## 2) Fuero (MVP)
+Arrancamos por **Laboral**.
+
+### 2.1 Laboral (AR)
+- Nombre corto: **laboral**
+- Alias: trabajo | derecho laboral | CNAT (si aplica)
+- Entidades típicas: trabajador/a (demandante) vs empleador (demandado)
+- Tipos de conflicto frecuentes (para clasificar luego): despido, diferencias salariales, accidentes (según marco), registración, etc.
+
+### 2.2 Otros (placeholder)
 > Completar con lista real y naming estable.
 
 - Civil y Comercial Federal
@@ -15,7 +24,6 @@ Objetivo: fijar el “espacio de parámetros” para poder bajar y comparar sent
 - Criminal y Correccional Federal
 - Penal Económico
 - Seguridad Social
-- Laboral
 - Electoral
 
 ## 3) Instancia
