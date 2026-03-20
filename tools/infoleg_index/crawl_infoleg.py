@@ -85,6 +85,19 @@ def looks_empty(title: str | None, sumario: str | None) -> bool:
     return False
 
 
+def looks_like_normative_content(title: str | None, html: str) -> bool:
+    t = (title or "").upper()
+    # Quick allow-list by title keywords
+    if any(k in t for k in ["LEY", "DECRETO", "RESOLUC", "DISPOSIC", "ORDENANZA", "AUTORIZACION"]):
+        return True
+
+    # Fallback: detect article markers in page body
+    if re.search(r"(?im)\bART[ÍI]CULO\s+\d+|\bART\.\s*\d+", html):
+        return True
+
+    return False
+
+
 def init_db(db_path: str) -> sqlite3.Connection:
     con = sqlite3.connect(db_path)
     con.execute("PRAGMA journal_mode=WAL;")
@@ -163,9 +176,9 @@ def main():
             row["titulo"] = title
             row["sumario"] = sumario
 
-            # If it looks empty, still store; future parsers might extract more.
-            if looks_empty(title, sumario):
-                pass
+            # Skip non-normative noise pages but keep trace in DB.
+            if looks_empty(title, sumario) or not looks_like_normative_content(title, html):
+                row["error"] = "SKIP_NON_NORMATIVE"
 
         except Exception as e:
             row["error"] = f"{type(e).__name__}: {e}"
