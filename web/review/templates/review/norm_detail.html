@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ norm.display_reference }} · JurisAI{% endblock %}
+{% block content %}
+<a class="back" href="{% url 'review:norm_search' %}">← Volver al buscador</a>
+<header class="law-header panel">
+  <div><p class="eyebrow">{{ norm.norm_type|default:"Norma" }}{% if norm.year %} · {{ norm.year }}{% endif %}</p><h1>{{ norm.display_reference }}</h1><h2>{{ norm.display_title }}</h2>{% if norm.subject %}<p>{{ norm.subject }}</p>{% endif %}</div>
+  <div class="law-facts"><span>Estado de la fuente<strong>{{ norm.index_status }}</strong></span><span>Artículos disponibles<strong>{{ articles|length }}</strong></span><a class="infoleg-button" target="_blank" rel="noreferrer" href="{{ norm.infoleg_url }}">Ver fuente en InfoLEG ↗</a></div>
+</header>
+{% if norm.summary %}<section class="panel law-summary"><span class="label">Resumen</span><p>{{ norm.summary }}</p></section>{% endif %}
+<div class="law-layout">
+  <main class="articles-list">
+    <div class="results-heading"><h2>Texto articulado</h2><span>{{ articles|length }} artículos</span></div>
+    {% for article in articles %}<article class="panel law-article" id="articulo-{{ article.article_key }}"><h3>Artículo {{ article.article_label }}</h3>{% if article.heading %}<h4>{{ article.heading }}</h4>{% endif %}<div class="article-text">{{ article.display_version.text_normalized|linebreaks }}</div><small>{{ article.display_version.norm_version.version_type|title }} · Estado: {{ article.display_version.status }}</small></article>{% empty %}<div class="empty-state"><h2>Texto no disponible</h2><p>La ficha fue indexada, pero todavía no contamos con artículos procesados.</p></div>{% endfor %}
+  </main>
+  <aside class="law-relations">
+    <section class="panel"><h2>Modificada por</h2>{% for change in norm.changes_received.all %}<a class="relation-item" href="{% url 'review:norm_detail' change.amending_norm.id %}"><strong>{{ change.amending_norm.display_reference }}</strong><span>{{ change.change_type|title }} · Art. {{ change.affected_article.article_label }}</span></a>{% empty %}<p class="muted">Sin relaciones confirmadas.</p>{% endfor %}</section>
+    <section class="panel"><h2>Modifica a</h2>{% for change in norm.changes_made.all %}<a class="relation-item" href="{% url 'review:norm_detail' change.affected_norm.id %}"><strong>{{ change.affected_norm.display_reference }}</strong><span>{{ change.change_type|title }} · Art. {{ change.affected_article.article_label }}</span></a>{% empty %}<p class="muted">Sin relaciones confirmadas.</p>{% endfor %}</section>
+  </aside>
+</div>
+{% endblock %}

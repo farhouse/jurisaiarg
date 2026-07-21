@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Explorar normas · JurisAI{% endblock %}
+{% block content %}
+<section class="explorer-hero">
+  <p class="eyebrow">Archivo jurídico argentino</p>
+  <h1>Buscar y consultar normas</h1>
+  <p>Buscá por número, título, tema o palabras contenidas en sus artículos.</p>
+  <form method="get" class="law-search">
+    <input name="q" value="{{ query }}" placeholder="Ej.: contrato de trabajo, 20.744, sociedades…" autofocus>
+    <button class="button primary" type="submit">Buscar</button>
+  </form>
+  {% if query and parsed_query.filters %}<div class="interpreted-query"><span>Interpretamos:</span>{% for label, value in parsed_query.filters %}<strong>{{ label }}: {{ value }}</strong>{% endfor %}{% if parsed_query.text %}<strong>Texto: {{ parsed_query.text }}</strong>{% endif %}</div>{% endif %}
+</section>
+<div class="results-heading"><h2>{% if query %}Resultados para “{{ query }}”{% else %}Normas disponibles{% endif %}</h2><span>{{ page.paginator.count }} normas</span></div>
+<section class="norm-grid">
+  {% for norm in page %}
+  <article class="norm-card">
+    <div class="change-meta"><span class="badge type">{{ norm.norm_type|default:"Norma" }}</span>{% if norm.year %}<span>{{ norm.year }}</span>{% endif %}<span class="confidence">InfoLEG {{ norm.infoleg_id }}</span></div>
+    <h2><a href="{% url 'review:norm_detail' norm.id %}">{{ norm.display_reference }}</a></h2>
+    <h3>{{ norm.display_title }}</h3>
+    {% if norm.subject %}<p>{{ norm.subject|truncatewords:38 }}</p>{% elif norm.summary %}<p>{{ norm.summary|truncatewords:38 }}</p>{% endif %}
+    <footer><span>{{ norm.article_count }} artículos</span><a href="{% url 'review:norm_detail' norm.id %}">Consultar norma →</a></footer>
+  </article>
+  {% empty %}<div class="empty-state"><h2>No encontramos normas</h2><p>Probá con otro número o términos más generales.</p></div>{% endfor %}
+</section>
+{% if page.paginator.num_pages > 1 %}<nav class="pagination">{% if page.has_previous %}<a href="?q={{ query|urlencode }}&page={{ page.previous_page_number }}">Anterior</a>{% endif %}<span>Página {{ page.number }} de {{ page.paginator.num_pages }}</span>{% if page.has_next %}<a href="?q={{ query|urlencode }}&page={{ page.next_page_number }}">Siguiente</a>{% endif %}</nav>{% endif %}
+{% endblock %}

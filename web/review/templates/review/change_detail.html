@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Cambio #{{ change.id }} · JurisAI{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div><a class="back" href="{% url 'review:list' %}">← Volver a la cola</a><p class="eyebrow">Propuesta generada automáticamente</p><h1>Relación jurídica #{{ change.id }}</h1></div>
+  <div class="change-meta"><span class="badge {{ change.review_status }}">{{ change.get_review_status_display }}</span><span class="badge type">{{ change.change_type }}</span><span class="confidence">{{ change.confidence }}</span></div>
+</div>
+<div class="review-layout">
+  <section class="review-main">
+    <article class="panel legal-map">
+      <div><span class="label">Norma modificadora</span><h2>{{ change.amending_norm.display_reference|default:change.amending_reference_raw }}</h2>{% if change.amending_norm %}<p>{{ change.amending_norm.display_title }}</p><a class="infoleg-button" target="_blank" rel="noreferrer" href="{{ change.amending_norm.infoleg_url }}">Ver ley modificadora en InfoLEG ↗</a>{% endif %}<strong>Artículo {{ change.amending_article_reference|default:"—" }}</strong></div>
+      <div class="arrow">{{ change.change_type }} →</div>
+      <div><span class="label">Norma afectada</span><h2>{{ change.affected_norm.display_reference }}</h2><p>{{ change.affected_norm.display_title }}</p><a class="infoleg-button" target="_blank" rel="noreferrer" href="{{ change.affected_norm.infoleg_url }}">Ver ley afectada en InfoLEG ↗</a><strong>{{ change.affected_scope|title }} {{ change.affected_article.article_label }}</strong></div>
+    </article>
+    <article class="panel"><span class="label">Evidencia editorial</span><blockquote class="evidence">{{ change.evidence_text }}</blockquote><div class="dates"><span>Publicación: <strong>{{ change.publication_date|date:"d/m/Y"|default:"—" }}</strong></span><span>Vigencia: <strong>{{ change.effect_date|date:"d/m/Y"|default:"No determinada" }}</strong></span><span>Parser: <strong>{{ change.parser_version }}</strong></span></div></article>
+    <article class="panel modifying-text">
+      <span class="label">Texto que produce la modificación</span>
+      <h2>{{ change.amending_norm.display_reference|default:change.amending_reference_raw }} · Artículo {{ change.amending_article_reference|default:"sin identificar" }}</h2>
+      {% if amending_article_version %}
+        <div class="article-text">{{ amending_article_version.text_normalized|linebreaks }}</div>
+        <p class="text-source">Versión {{ amending_article_version.norm_version.version_type }} · Estado: {{ amending_article_version.status }}</p>
+      {% else %}
+        <div class="source-missing"><strong>Texto todavía no disponible en el archivo local.</strong><p>La relación fue identificada, pero el crawler aún no descargó el articulado completo de esta norma modificadora.</p>{% if change.amending_norm %}<a class="infoleg-button" target="_blank" rel="noreferrer" href="{{ change.amending_norm.infoleg_url }}">Leer artículo en InfoLEG ↗</a>{% endif %}</div>
+      {% endif %}
+    </article>
+    <details class="panel context"><summary>Ver texto del artículo afectado y su nota editorial</summary><pre>{{ change.source_article_version.text_normalized }}</pre></details>
+  </section>
+  <aside class="panel review-form">
+    <span class="label">Revisión jurídica</span>
+    <h2>¿Qué hay que comprobar?</h2>
+    <p class="review-intro">El parser propone que una norma modificó a otra. Revisá la evidencia y los enlaces de InfoLEG para confirmar si la relación es correcta.</p>
+    <ul class="review-checklist">
+      <li>Las normas modificadora y afectada</li>
+      <li>El artículo o alcance indicado</li>
+      <li>La acción: sustituye, incorpora o deroga</li>
+      <li>Que la evidencia respalde la propuesta</li>
+    </ul>
+    <form method="post" action="{% url 'review:review' change.id %}" class="stack-form">
+      {% csrf_token %}
+      <fieldset class="review-status-options">
+        <legend>Decisión</legend>
+        {% for radio in form.review_status %}
+          <label class="review-status-option {{ radio.choice_value }}">
+            {{ radio.tag }}
+            <span>{{ radio.choice_label }}</span>
+          </label>
+        {% endfor %}
+        {% for error in form.review_status.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+      </fieldset>
+      <label class="notes-field" for="{{ form.review_notes.id_for_label }}">
+        <span>Observaciones <small>Opcionales al confirmar; obligatorias si la relación es incorrecta.</small></span>
+        {{ form.review_notes }}
+      </label>
+      {% for error in form.review_notes.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+      {% if next_change %}<input type="hidden" name="next_id" value="{{ next_change.id }}">{% endif %}
+      <button class="button primary" type="submit">Guardar decisión{% if next_change %} y continuar{% endif %}</button>
+    </form>
+    {% if change.reviewed_by %}<p class="audit">Revisado por {{ change.reviewed_by }} · {{ change.reviewed_at|date:"d/m/Y H:i" }}</p>{% endif %}
+  </aside>
+</div>
+{% endblock %}

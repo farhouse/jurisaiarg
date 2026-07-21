@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Resumen · JurisAI{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div><p class="eyebrow">Control de calidad</p><h1>Revisión de relaciones jurídicas</h1><p class="heading-help">El parser detecta posibles modificaciones entre normas; una persona revisa la evidencia antes de incorporarlas como relaciones confiables.</p></div>
+  <a class="button primary" href="{% url 'review:list' %}">Empezar a revisar</a>
+</div>
+<section class="stats-grid">
+  <article><span>Total</span><strong>{{ totals.total }}</strong></article>
+  <article><span>Pendientes de revisión</span><strong>{{ totals.pending }}</strong></article>
+  <article><span>Relaciones confirmadas</span><strong>{{ totals.validated }}</strong></article>
+  <article><span>Relaciones incorrectas</span><strong>{{ totals.rejected }}</strong></article>
+  <article><span>Norma sin resolver</span><strong>{{ totals.unresolved }}</strong></article>
+</section>
+<section class="panel">
+  <div class="panel-heading"><h2>Distribución por tipo</h2></div>
+  <div class="type-list">
+    {% for row in by_type %}
+      <div><span class="badge type">{{ row.change_type }}</span><strong>{{ row.total }}</strong></div>
+    {% empty %}<p class="muted">Todavía no hay cambios extraídos.</p>{% endfor %}
+  </div>
+</section>
+{% endblock %}

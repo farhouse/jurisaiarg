@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Cambios · JurisAI{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">Propuestas del parser</p><h1>Relaciones jurídicas para revisar</h1><p class="heading-help">Cada resultado es una relación detectada automáticamente entre una norma modificadora y una norma afectada.</p></div><span class="muted">{{ page.paginator.count }} resultados</span></div>
+<form method="get" class="filters panel">
+  <label>Estado<select name="status"><option value="pendiente">Pendiente de revisión</option><option value="validada" {% if request.GET.status == 'validada' %}selected{% endif %}>Relación confirmada</option><option value="rechazada" {% if request.GET.status == 'rechazada' %}selected{% endif %}>Relación incorrecta</option><option value="todos" {% if request.GET.status == 'todos' %}selected{% endif %}>Todos los estados</option></select></label>
+  <label>Tipo<select name="type"><option value="">Todos</option><option value="sustituye">Sustituye</option><option value="incorpora">Incorpora</option><option value="deroga">Deroga</option><option value="modifica">Modifica</option></select></label>
+  <label>Alcance<select name="scope"><option value="">Todos</option><option value="articulo">Artículo</option><option value="inciso">Inciso</option><option value="parrafo">Párrafo</option></select></label>
+  <label>Confianza mínima<input name="min_confidence" inputmode="decimal" placeholder="0.90" value="{{ request.GET.min_confidence }}"></label>
+  <label class="search-label">Buscar<input name="q" placeholder="Número, título o evidencia" value="{{ request.GET.q }}"></label>
+  <button class="button" type="submit">Filtrar</button>
+</form>
+<section class="change-list">
+  {% for change in page %}
+    <article class="change-card">
+      <div class="change-meta"><span class="badge {{ change.review_status }}">{{ change.get_review_status_display }}</span><span class="badge type">{{ change.change_type }}</span><span>{{ change.affected_scope }}</span><span class="confidence">{{ change.confidence }}</span></div>
+      <h2><a class="change-detail-link" href="{% url 'review:detail' change.id %}">{{ change.affected_norm.display_reference }} · Art. {{ change.affected_article.article_label }}</a></h2>
+      <p>{{ change.affected_norm.display_title }}</p>
+      <blockquote>{{ change.evidence_text }}</blockquote>
+      <footer class="source-links">
+        <a target="_blank" rel="noreferrer" href="{{ change.affected_norm.infoleg_url }}">Ley afectada en InfoLEG ↗</a>
+        {% if change.amending_norm %}<a target="_blank" rel="noreferrer" href="{{ change.amending_norm.infoleg_url }}">Ley modificadora en InfoLEG ↗</a>{% endif %}
+        <a class="review-link" href="{% url 'review:detail' change.id %}">Revisar propuesta →</a>
+      </footer>
+    </article>
+  {% empty %}<div class="empty-state"><h2>No encontramos cambios</h2><p>Probá modificando los filtros.</p></div>{% endfor %}
+</section>
+{% if page.paginator.num_pages > 1 %}
+<nav class="pagination">
+  {% if page.has_previous %}<a href="?page={{ page.previous_page_number }}&status={{ request.GET.status }}">Anterior</a>{% endif %}
+  <span>Página {{ page.number }} de {{ page.paginator.num_pages }}</span>
+  {% if page.has_next %}<a href="?page={{ page.next_page_number }}&status={{ request.GET.status }}">Siguiente</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,40 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: juris_ai
+      POSTGRES_USER: juris_ai
+      POSTGRES_PASSWORD: juris_ai_local
+    ports:
+      - "55432:5432"
+    volumes:
+      - juris_ai_pgdata:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U juris_ai -d juris_ai"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  web:
+    build:
+      context: ../../web
+    environment:
+      POSTGRES_DB: juris_ai
+      POSTGRES_USER: juris_ai
+      POSTGRES_PASSWORD: juris_ai_local
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      DJANGO_SECRET_KEY: local-development-only-change-me
+      DJANGO_DEBUG: "true"
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ../../web:/app
+
+volumes:
+  juris_ai_pgdata:

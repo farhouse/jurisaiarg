@@ -1,0 +1,27 @@
+{% load static %}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}JurisAI Review{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'app.css' %}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{% url 'review:norm_search' %}">JurisAI <span>Archivo jurídico</span></a>
+    {% if user.is_authenticated %}
+      <nav>
+        <a href="{% url 'review:norm_search' %}">Explorar leyes</a>
+        <a href="{% url 'review:dashboard' %}">Control del parser</a>
+        {% if user.is_staff %}<a href="/admin/">Admin</a>{% endif %}
+        <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="link-button">Salir</button></form>
+      </nav>
+    {% endif %}
+  </header>
+  <main class="container">
+    {% for message in messages %}<div class="message">{{ message }}</div>{% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
