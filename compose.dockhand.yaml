@@ -27,7 +27,7 @@ services:
       start_period: 10s
 
   init:
-    image: ghcr.io/farhouse/jurisaiarg-crawler:${JURISAI_IMAGE_TAG:-1203f13ebdc61355f338d99f0e8bb9a925e35552}
+    image: ghcr.io/farhouse/jurisaiarg-crawler:${JURISAI_IMAGE_TAG:-54ffe686eeca3f434c9daca9aee5ca5f787a370e}
     platform: linux/amd64
     restart: "no"
     command: ["python", "worker.py", "--init"]
@@ -39,7 +39,7 @@ services:
         condition: service_healthy
 
   web:
-    image: ghcr.io/farhouse/jurisaiarg-web:${JURISAI_IMAGE_TAG:-1203f13ebdc61355f338d99f0e8bb9a925e35552}
+    image: ghcr.io/farhouse/jurisaiarg-web:${JURISAI_IMAGE_TAG:-54ffe686eeca3f434c9daca9aee5ca5f787a370e}
     platform: linux/amd64
     restart: unless-stopped
     environment:
@@ -61,7 +61,7 @@ services:
         condition: service_completed_successfully
 
   crawler:
-    image: ghcr.io/farhouse/jurisaiarg-crawler:${JURISAI_IMAGE_TAG:-1203f13ebdc61355f338d99f0e8bb9a925e35552}
+    image: ghcr.io/farhouse/jurisaiarg-crawler:${JURISAI_IMAGE_TAG:-54ffe686eeca3f434c9daca9aee5ca5f787a370e}
     platform: linux/amd64
     restart: unless-stopped
     init: true

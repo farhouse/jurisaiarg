@@ -61,7 +61,7 @@ pegar el YAML y configurar estas variables en el panel del stack:
 | `JURISAI_PORT` | Opcional: puerto HTTP, por defecto `8000`. |
 
 Para generar cada secreto por separado se puede usar `openssl rand -hex 32`.
-El archivo fija la versión publicada `1203f13`; `JURISAI_IMAGE_TAG` permite
+El archivo fija la versión publicada `54ffe68`; `JURISAI_IMAGE_TAG` permite
 seleccionar otro SHA publicado o `latest`. Las imágenes son Linux/amd64.
 No hay que clonar código, compilar, montar carpetas ni configurar acceso a GHCR.
 El servicio `init` termina con código 0 al preparar el esquema: es normal.
@@ -103,11 +103,11 @@ alcanzar `web:8000` por su red Docker. Las cookies seguras requieren entrar por
 HTTPS para iniciar sesión; conservar `false` para una instalación solo HTTP.
 
 Para actualizar: usar este Compose, quitar una etiqueta antigua de
-`JURISAI_IMAGE_TAG` si está configurada, hacer pull y recrear `web`, conservando
+`JURISAI_IMAGE_TAG` si está configurada, hacer pull y recrear `init`, `crawler` y `web`, conservando
 `DJANGO_SECRET_KEY`, la contraseña de PostgreSQL y el volumen existente.
 Volver a abrir el formulario de login antes de enviarlo. No es necesario crear
 nuevamente el superusuario. La protección CSRF permanece activa.
-El procesamiento local por etapas se describe en la sección siguiente; requiere las imágenes de esta versión, todavía sin publicar.
+El procesamiento local por etapas se describe en la sección siguiente; requiere actualizar las imágenes y recrear `init`, `crawler` y `web` juntos.
 Referencia de la interfaz: [manual de Dockhand](https://dockhand.pro/manual/#creating-stacks).
 
 ### Publicación y uso con Docker Compose
@@ -155,7 +155,7 @@ lo reinicia cuando su proceso termina. Para aplicar una imagen nueva hay que
 hacer pull y recrear los contenedores, no solo reiniciarlos.
 
 
-### Procesamiento local por etapas (versión en desarrollo)
+### Procesamiento local por etapas
 
 En **Gestión → Descargar y procesar** se puede elegir:
 
@@ -223,7 +223,10 @@ docker compose -f tools/infoleg_index/compose.yaml build web init
 ```
 
 `init` crea/actualiza las tablas, incluyendo `semantic_passages`. Al desplegar una
-futura publicación, recrear también `init`, `crawler` y `web`, manteniendo los dos
-volúmenes. El Compose de Dockhand conserva por ahora su etiqueta publicada anterior;
-seleccionar el nuevo SHA cuando se autorice su publicación. Esta versión no hace
-push ni publica imágenes automáticamente desde la máquina local.
+esta versión, recrear `init`, `crawler` y `web`, manteniendo los dos volúmenes.
+El Compose de Dockhand fija las imágenes de `54ffe686eeca3f434c9daca9aee5ca5f787a370e`.
+Si `JURISAI_IMAGE_TAG` tiene otro valor en el stack, actualizarlo a ese SHA o quitarlo
+para usar el valor del archivo. Se necesita el Compose actualizado para montar
+`juris_ai_models` en web y crawler y conservar los modelos entre actualizaciones.
+El detalle de cada solicitud muestra descarga/carga de modelos, documento en curso,
+última actividad y señal del trabajador; se actualiza cada 10 segundos.
