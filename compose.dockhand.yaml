@@ -47,6 +47,9 @@ services:
       DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:?Configura DJANGO_SECRET_KEY en Dockhand}"
       DJANGO_DEBUG: "false"
       DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,${DJANGO_ALLOWED_HOSTS:?Configura la IP o el dominio del servidor sin protocolo ni puerto}"
+      DJANGO_CSRF_TRUSTED_ORIGINS: "${DJANGO_CSRF_TRUSTED_ORIGINS:-}"
+      DJANGO_TRUST_PROXY_HEADERS: "${DJANGO_TRUST_PROXY_HEADERS:-false}"
+      DJANGO_SECURE_COOKIES: "${DJANGO_SECURE_COOKIES:-false}"
     ports:
       - "${JURISAI_BIND_IP:-0.0.0.0}:${JURISAI_PORT:-8000}:8000"
     depends_on:

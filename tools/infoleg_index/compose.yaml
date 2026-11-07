@@ -29,6 +29,9 @@ services:
       DJANGO_SECRET_KEY: local-development-only-change-me
       DJANGO_DEBUG: "false"
       DJANGO_ALLOWED_HOSTS: "${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,192.168.1.152}"
+      DJANGO_CSRF_TRUSTED_ORIGINS: "${DJANGO_CSRF_TRUSTED_ORIGINS:-}"
+      DJANGO_TRUST_PROXY_HEADERS: "${DJANGO_TRUST_PROXY_HEADERS:-false}"
+      DJANGO_SECURE_COOKIES: "${DJANGO_SECURE_COOKIES:-false}"
     ports:
       - "8000:8000"
     depends_on:

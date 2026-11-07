@@ -76,10 +76,35 @@ en su volumen. Mantener las claves y el nombre del stack al redesplegar;
 cambiar `POSTGRES_PASSWORD` en las variables no cambia la contraseña de una
 base ya inicializada. No eliminar el volumen al actualizar.
 
-Este archivo habilita acceso HTTP directo por IP/red local. Si se publica
-detrás de un proxy HTTPS, hay que configurar también en Django los orígenes
-CSRF y la detección de HTTPS; las imágenes de esta versión no exponen esas
-opciones por variables de entorno. Laya conserva su ejecución separada.
+El acceso HTTP directo por IP/red local sigue disponible por defecto.
+Para HTTPS mediante Cloudflare Tunnel, configurar en las variables del stack:
+
+```text
+DJANGO_ALLOWED_HOSTS=jurisai.farhouse.org
+DJANGO_CSRF_TRUSTED_ORIGINS=https://jurisai.farhouse.org
+DJANGO_TRUST_PROXY_HEADERS=true
+DJANGO_SECURE_COOKIES=true
+```
+
+`DJANGO_ALLOWED_HOSTS` acepta hosts separados por comas, sin protocolo ni puerto.
+`DJANGO_CSRF_TRUSTED_ORIGINS` acepta orígenes separados por comas, con `https://`
+y sin barra final. El Compose agrega localhost para el healthcheck.
+Las tres opciones nuevas deben estar dentro de `web.environment` del Compose;
+agregarlas al panel de Dockhand con un YAML antiguo no las pasa al contenedor.
+
+Confiar en `X-Forwarded-Proto` solo cuando el origen recibe tráfico mediante
+un proxy confiable que sobrescribe ese header, como Cloudflare. No exponer el
+puerto de origen directamente a Internet. Si cloudflared corre en el mismo host,
+se puede usar `JURISAI_BIND_IP=127.0.0.1`; si corre en otro contenedor, debe poder
+alcanzar `web:8000` por su red Docker. Las cookies seguras requieren entrar por
+HTTPS para iniciar sesión; conservar `false` para una instalación solo HTTP.
+
+Para actualizar: usar este Compose, quitar una etiqueta antigua de
+`JURISAI_IMAGE_TAG` si está configurada, hacer pull y recrear `web`, conservando
+`DJANGO_SECRET_KEY`, la contraseña de PostgreSQL y el volumen existente.
+Volver a abrir el formulario de login antes de enviarlo. No es necesario crear
+nuevamente el superusuario. La protección CSRF permanece activa.
+Laya conserva su ejecución separada.
 Referencia de la interfaz: [manual de Dockhand](https://dockhand.pro/manual/#creating-stacks).
 
 ### Publicación y uso con Docker Compose

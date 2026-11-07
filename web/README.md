@@ -184,3 +184,19 @@ no necesitan carpetas del host montadas. Al editar código hay que reconstruir.
 Los datos permanecen en el volumen `juris_ai_pgdata`; no usar `down -v` para
 actualizar. El archivo privado de acceso local y las vistas previas quedan fuera
 de las imágenes. La configuración actual está destinada a pruebas en la red local.
+
+## HTTPS detrás de Cloudflare Tunnel
+
+La imagen permite configurar `DJANGO_CSRF_TRUSTED_ORIGINS` (orígenes con esquema,
+separados por comas), `DJANGO_TRUST_PROXY_HEADERS=true` (confía en
+`X-Forwarded-Proto: https`) y `DJANGO_SECURE_COOKIES=true` (cookies de sesión y
+CSRF solo por HTTPS). Por defecto las tres opciones están desactivadas/vacías
+para conservar el acceso HTTP local. El origen debe aceptar el tráfico del proxy
+confiable, sin exposición directa a Internet al confiar en su header.
+
+Ejemplo: host `jurisai.farhouse.org`, origen CSRF `https://jurisai.farhouse.org`.
+El Compose debe pasar estas variables a `web.environment`. Hacer pull de la
+imagen corregida y recrear web; conservar claves, usuarios y volumen. Recargar
+el formulario de login. No se desactiva CSRF ni se usa un comodín de orígenes.
+Las pruebas reproducen el 403 anterior y verifican login web/admin, rechazo de
+origen ajeno o token ausente, cookies seguras y compatibilidad HTTP local.
