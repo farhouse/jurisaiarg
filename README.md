@@ -44,6 +44,46 @@ de controles de índice en segundo plano. Laya se ejecuta por separado; ver
 
 ## Imágenes en GitHub Container Registry
 
+### Cargar en Dockhand
+
+Usar el archivo independiente [compose.dockhand.yaml](compose.dockhand.yaml).
+En **Stacks → Create stack**, elegir un nombre (por ejemplo `jurisaiarg`),
+pegar el YAML y configurar estas variables en el panel del stack:
+
+| Variable | Valor |
+| --- | --- |
+| `POSTGRES_PASSWORD` | Contraseña propia de PostgreSQL; marcar como secreto. |
+| `DJANGO_SECRET_KEY` | Clave aleatoria propia de al menos 50 caracteres; marcar como secreto. |
+| `DJANGO_ALLOWED_HOSTS` | IP del servidor o dominios separados por comas, sin protocolo ni puerto. |
+| `JURISAI_PORT` | Opcional: puerto HTTP, por defecto `8000`. |
+
+Para generar cada secreto por separado se puede usar `openssl rand -hex 32`.
+El archivo fija la versión publicada `23b7250`; `JURISAI_IMAGE_TAG` permite
+seleccionar otro SHA publicado o `latest`. Las imágenes son Linux/amd64.
+No hay que clonar código, compilar, montar carpetas ni configurar acceso a GHCR.
+El servicio `init` termina con código 0 al preparar el esquema: es normal.
+
+Al estar `web` saludable, abrir `http://IP_DEL_SERVIDOR:8000`. En una instalación
+nueva, abrir la terminal del contenedor **web** desde Dockhand y ejecutar:
+
+```bash
+python manage.py createsuperuser
+```
+
+La base comienza vacía: este despliegue no copia los datos ni las cuentas de
+la Mac. PostgreSQL queda accesible solo dentro del stack y los datos persisten
+en su volumen. Mantener las claves y el nombre del stack al redesplegar;
+cambiar `POSTGRES_PASSWORD` en las variables no cambia la contraseña de una
+base ya inicializada. No eliminar el volumen al actualizar.
+
+Este archivo habilita acceso HTTP directo por IP/red local. Si se publica
+detrás de un proxy HTTPS, hay que configurar también en Django los orígenes
+CSRF y la detección de HTTPS; las imágenes de esta versión no exponen esas
+opciones por variables de entorno. Laya conserva su ejecución separada.
+Referencia de la interfaz: [manual de Dockhand](https://dockhand.pro/manual/#creating-stacks).
+
+### Publicación y uso con Docker Compose
+
 El workflow `Publish Docker images` publica en cada push a `main` y también
 puede ejecutarse manualmente desde Actions:
 

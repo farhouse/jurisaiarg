@@ -1,0 +1,73 @@
+# Archivo independiente para Dockhand: no necesita código ni archivos de la Mac.
+# Configurar POSTGRES_PASSWORD, DJANGO_SECRET_KEY y DJANGO_ALLOWED_HOSTS
+# en las variables del stack antes de desplegar.
+
+x-database-environment: &database-environment
+  POSTGRES_DB: juris_ai
+  POSTGRES_USER: juris_ai
+  POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Configura POSTGRES_PASSWORD en Dockhand}"
+  POSTGRES_HOST: db
+  POSTGRES_PORT: "5432"
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: juris_ai
+      POSTGRES_USER: juris_ai
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Configura POSTGRES_PASSWORD en Dockhand}"
+    volumes:
+      - juris_ai_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U juris_ai -d juris_ai"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  init:
+    image: ghcr.io/farhouse/jurisaiarg-crawler:${JURISAI_IMAGE_TAG:-23b725094f352be60e79d0829d7ba45d9f43ad96}
+    platform: linux/amd64
+    restart: "no"
+    command: ["python", "worker.py", "--init"]
+    environment: *database-environment
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    image: ghcr.io/farhouse/jurisaiarg-web:${JURISAI_IMAGE_TAG:-23b725094f352be60e79d0829d7ba45d9f43ad96}
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      <<: *database-environment
+      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:?Configura DJANGO_SECRET_KEY en Dockhand}"
+      DJANGO_DEBUG: "false"
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,${DJANGO_ALLOWED_HOSTS:?Configura la IP o el dominio del servidor sin protocolo ni puerto}"
+    ports:
+      - "${JURISAI_BIND_IP:-0.0.0.0}:${JURISAI_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/accounts/login/', timeout=5).close()"]
+      interval: 15s
+      timeout: 6s
+      retries: 5
+      start_period: 30s
+
+  crawler:
+    image: ghcr.io/farhouse/jurisaiarg-crawler:${JURISAI_IMAGE_TAG:-23b725094f352be60e79d0829d7ba45d9f43ad96}
+    platform: linux/amd64
+    restart: unless-stopped
+    init: true
+    environment: *database-environment
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+volumes:
+  juris_ai_pgdata:
