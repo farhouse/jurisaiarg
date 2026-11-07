@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Crear validador · JurisAI{% endblock %}
+{% block content %}
+<a class="back" href="{% url 'review:validators' %}">Volver a Validadores</a>
+<header class="work-heading"><div><h1>Crear validador</h1><p>La cuenta podrá revisar normas y guardar sus decisiones. No tendrá acceso a Gestión.</p></div></header>
+<form method="post" class="panel stack-form validator-form">
+  {% csrf_token %}
+  {% include "review/validator_fields.html" %}
+  <p class="muted">Nombre, apellido y correo son opcionales. Compartí el usuario, la contraseña y el enlace de ingreso por un canal privado. No se envían invitaciones por correo.</p>
+  <div class="crawl-actions"><button class="button primary">Crear cuenta</button><a class="button" href="{% url 'review:validators' %}">Cancelar</a></div>
+</form>
+{% endblock %}

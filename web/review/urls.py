@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import crawler, views, workflow
+from . import crawler, validators, views, workflow
 
 
 app_name = "review"
@@ -12,6 +12,9 @@ urlpatterns = [
     path("validar/guia/", workflow.guide, name="guide"),
     path("validar/<int:pk>/", workflow.task_detail, name="task"),
     path("gestion/", workflow.management, name="management"),
+    path("gestion/validadores/", validators.index, name="validators"),
+    path("gestion/validadores/nuevo/", validators.create, name="validator_create"),
+    path("gestion/validadores/<int:pk>/", validators.detail, name="validator_detail"),
     path("gestion/descargas/", crawler.jobs, name="crawl_jobs"),
     path("gestion/descargas/<int:pk>/", crawler.job_detail, name="crawl_job"),
     path("gestion/leyes/<int:pk>/", workflow.law_reviews, name="law_reviews"),

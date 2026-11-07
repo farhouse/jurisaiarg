@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ account.username }} · Validadores · JurisAI{% endblock %}
+{% block content %}
+<a class="back" href="{% url 'review:validators' %}">Volver a Validadores</a>
+<header class="work-heading"><div><h1>{{ account.username }}</h1><p>Cuenta de validador · {% if account.is_active %}Acceso activo{% else %}Acceso desactivado{% endif %}</p></div><a class="button" href="{% url 'review:guide' %}">Guía del validador</a></header>
+<form method="post" class="panel stack-form validator-form">
+  {% csrf_token %}
+  <h2>Datos y acceso</h2>
+  {% include "review/validator_fields.html" %}
+  <p class="muted">El nombre de usuario se conserva para mantener la referencia en el historial.</p>
+  <div class="crawl-actions"><button class="button primary">Guardar cambios</button></div>
+</form>
+<section class="panel table-panel">
+  <h2>Revisiones de normas · {{ page.paginator.count }}</h2>
+  <p class="muted">Última decisión de esta persona por norma y lote. Abrí una norma para consultar las demás opiniones y el historial.</p>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Revisiones de normas"><table><caption class="sr-only">Normas revisadas por {{ account.username }}</caption><thead><tr><th scope="col">Norma y lote</th><th scope="col">Resultado</th><th scope="col">Fecha</th><th scope="col">Observaciones</th></tr></thead><tbody>
+  {% for vote in page %}<tr><th scope="row"><a href="{% url 'review:law_reviews' vote.task_id %}">{{ vote.task.norm.display_reference }}</a><p class="muted">{{ vote.task.crawl_run.label }}</p></th><td><span class="badge {{ vote.status }}">{{ vote.get_status_display }}</span></td><td class="vote-date">{{ vote.updated_at|date:"d/m/Y H:i" }}</td><td class="vote-notes">{{ vote.notes|default:"Sin observaciones"|linebreaksbr }}</td></tr>{% empty %}<tr><td colspan="4" class="table-empty">Esta persona todavía no guardó revisiones de normas.</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% if page.paginator.num_pages > 1 %}<nav class="pagination" aria-label="Páginas de revisiones">{% if page.has_previous %}<a href="?page={{ page.previous_page_number }}">Anterior</a>{% endif %}<span>{{ page.number }} / {{ page.paginator.num_pages }}</span>{% if page.has_next %}<a href="?page={{ page.next_page_number }}">Siguiente</a>{% endif %}</nav>{% endif %}
+</section>
+<section class="panel table-panel"><h2>Actividad en pasajes</h2><p class="muted">Últimos 20 cambios guardados por esta persona. Un pasaje puede aparecer varias veces; estos eventos no se suman a las revisiones de normas.</p><ol class="decision-history">{% for event in events %}<li><a href="{% url 'review:task' event.task_id %}">{{ event.task.norm.display_reference }} · Pasaje {{ event.task_id }}</a> · {% if event.status == 'validada' %}Correcto{% elif event.status == 'rechazada' %}Incorrecto{% else %}Pendiente{% endif %}<time>{{ event.created_at|date:"d/m/Y H:i" }}</time>{% if event.notes %}<p>{{ event.notes|linebreaksbr }}</p>{% endif %}</li>{% empty %}<li>Todavía no hay actividad en pasajes.</li>{% endfor %}</ol></section>
+{% endblock %}

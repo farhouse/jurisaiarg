@@ -1,0 +1,8 @@
+{% if form.errors %}<div class="notice" role="alert">Revisá los campos indicados antes de guardar.{{ form.non_field_errors }}</div>{% endif %}
+{% for field in form %}
+<div class="validator-field{% if field.field.widget.input_type == 'checkbox' %} validator-checkbox{% endif %}">
+  {{ field.label_tag }}{{ field }}
+  {% if field.help_text %}<div id="{{ field.auto_id }}_helptext" class="field-help">{{ field.help_text|safe }}</div>{% endif %}
+  {% if field.errors %}<div class="field-error">{{ field.errors }}</div>{% endif %}
+</div>
+{% endfor %}

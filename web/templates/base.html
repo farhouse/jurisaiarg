@@ -16,7 +16,7 @@
         <a href="{% url 'review:norm_search' %}">Explorar leyes</a>
         <a href="{% url 'review:queue' %}">Validar</a>
         <a href="{% url 'review:guide' %}">Guía del validador</a>
-        {% if user.is_staff %}<a href="{% url 'review:management' %}">Gestión</a><a href="/admin/auth/user/">Usuarios</a>{% endif %}
+        {% if user.is_staff %}<a href="{% url 'review:management' %}">Gestión</a><a href="{% url 'review:validators' %}">Validadores</a>{% endif %}
         <span class="session-user">{{ user.username }}</span>
         <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="link-button">Salir</button></form>
       </nav>

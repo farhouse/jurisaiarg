@@ -147,3 +147,22 @@ tbody th { font-weight:650; }.table-empty { padding:30px 12px; color:var(--muted
 .crawl-range .errorlist { padding-left:18px; color:#913e36; max-width:32ch; }
 .crawl-progress { width:100%; max-width:600px; height:18px; accent-color:var(--green); }
 @media(max-width:600px) { .crawl-range > div { flex-basis:100%; max-width:none; }.crawl-range button { margin-top:0; } }
+
+/* Validadores: extensión del panel de Gestión. */
+.validator-filters { display:grid; grid-template-columns:minmax(0,2fr) minmax(0,1fr) auto; align-items:end; gap:16px; margin:28px 0; }
+.validator-filters label { display:grid; gap:6px; font-size:13px; font-weight:650; }
+.validator-table { min-width:720px; }
+.validator-table small { display:block; margin-top:4px; color:var(--muted); font-weight:400; overflow-wrap:anywhere; }
+.validator-table th:first-child { max-width:300px; overflow-wrap:anywhere; }
+.validator-form { max-width:720px; gap:22px; }
+.validator-form h2 { margin:0; }
+.validator-field label { font-weight:650; }
+.validator-field .field-help { color:var(--muted); font-size:13px; margin-top:6px; }
+.validator-field .field-help ul { margin:6px 0 0; padding-left:20px; list-style:disc; }
+.validator-field .errorlist { margin:6px 0 0; }
+.validator-checkbox { display:grid; grid-template-columns:24px minmax(0,1fr); gap:6px 10px; align-items:center; }
+.validator-checkbox input { grid-column:1; grid-row:1; width:20px; height:20px; accent-color:var(--green); }
+.validator-checkbox label { grid-column:2; margin:0; }
+.validator-checkbox .field-help { grid-column:2; }
+.work-heading h1 { overflow-wrap:anywhere; }
+@media(max-width:600px) { .validator-filters { grid-template-columns:minmax(0,1fr); }.validator-form { padding:18px; } }

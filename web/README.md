@@ -62,9 +62,9 @@ Para la prueba local está creada `validador_local`, únicamente en el grupo
 de Git y con permisos de archivo `0600`. Usar cuentas individuales para atribuir
 el trabajo de cada persona.
 
-Desde `/admin/auth/group/` se puede crear `Validadores`; desde
-`/admin/auth/user/` se crean cuentas individuales y se asigna ese grupo. No dar
-`is_staff` a los validadores. La aplicación verifica estos permisos en el servidor.
+Desde **Gestión → Administrar validadores** (`/gestion/validadores/`) se crean cuentas individuales con el grupo `Validadores` asignado automáticamente. Permite buscar cuentas, editar nombre y correo, activar/desactivar el acceso y consultar decisiones por norma y lote, más los últimos 20 eventos de pasajes. Las revisiones se conservan al desactivar una cuenta.
+
+Solo administradores (`is_staff`) acceden a este panel. No permite conceder roles administrativos, modificar administradores, renombrar ni eliminar cuentas. Las contraseñas nuevas usan la validación de Django; el administrador comparte las credenciales por un canal privado, sin envío automático de correo. Django Admin queda disponible en `/admin/` como herramienta técnica, fuera de la navegación habitual.
 
 Cada decisión registra usuario, fecha, estado previo y observación. Marcar
 incorrecto exige un motivo. En los índices, cada persona guarda su propia

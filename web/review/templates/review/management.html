@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Revisión por ley · JurisAI{% endblock %}
 {% block content %}
-<header class="work-heading"><div><h1>Revisión por ley</h1><p>Qué normas hay y cuántas personas dejaron cada resultado.</p></div><div class="crawl-actions"><a class="button primary" href="{% url 'review:crawl_jobs' %}">Descargar índices</a><a class="button" href="/admin/auth/user/">Administrar validadores</a></div></header>
+<header class="work-heading"><div><h1>Revisión por ley</h1><p>Qué normas hay y cuántas personas dejaron cada resultado.</p></div><div class="crawl-actions"><a class="button primary" href="{% url 'review:crawl_jobs' %}">Descargar índices</a><a class="button" href="{% url 'review:validators' %}">Administrar validadores</a></div></header>
 <div class="work-summary"><span><strong>{{ law_count }}</strong> normas con control preparado</span><span><strong>{{ vote_count }}</strong> decisiones resueltas</span><span><strong>{{ disagreements }}</strong> normas con desacuerdos</span><span><strong>{{ unreviewed }}</strong> sin revisiones</span></div>
 <p class="muted">Control de la norma completa en el lote seleccionado. Una decisión vigente por persona y norma; cambiarla no suma otro voto. Los pasajes se revisan por separado.</p>
 <form method="get" class="law-filters">

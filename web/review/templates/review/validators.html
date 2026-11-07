@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Validadores · JurisAI{% endblock %}
+{% block content %}
+<a class="back" href="{% url 'review:management' %}">Volver a Gestión</a>
+<header class="work-heading"><div><h1>Validadores</h1><p>Administrá las cuentas y consultá el trabajo de cada persona.</p></div><a class="button primary" href="{% url 'review:validator_create' %}">Crear validador</a></header>
+<form method="get" class="validator-filters">
+  <label>Buscar persona<input name="q" value="{{ query }}" placeholder="Usuario, nombre o correo"></label>
+  <label>Acceso<select name="state"><option value="">Todos</option><option value="active" {% if state == 'active' %}selected{% endif %}>Activo</option><option value="inactive" {% if state == 'inactive' %}selected{% endif %}>Desactivado</option></select></label>
+  <button class="button">Buscar</button>
+</form>
+<section class="panel table-panel">
+  <div class="section-title"><h2>{{ page.paginator.count }} cuentas</h2><span class="muted">Decisiones sobre normas · todos los lotes</span></div>
+  {% if page %}<div class="table-scroll" tabindex="0" role="region" aria-label="Cuentas de validadores"><table class="validator-table"><caption class="sr-only">Acceso y decisiones vigentes de cada validador</caption><thead><tr><th scope="col">Persona</th><th scope="col">Acceso</th><th scope="col">Correcto</th><th scope="col">Incorrecto</th><th scope="col">Pendiente</th><th scope="col">Último ingreso</th></tr></thead><tbody>
+  {% for account in page %}<tr>
+    <th scope="row"><a href="{% url 'review:validator_detail' account.pk %}">{{ account.username }}</a><small>{{ account.get_full_name|default:"Sin nombre registrado" }}</small>{% if account.email %}<small>{{ account.email }}</small>{% endif %}</th>
+    <td>{% if account.is_active %}<span class="badge validada">Activo</span>{% else %}<span class="badge pendiente">Desactivado</span>{% endif %}</td>
+    <td>{{ account.review_counts.approved }}</td><td>{{ account.review_counts.rejected }}</td><td>{{ account.review_counts.pending }}</td><td>{{ account.last_login|date:"d/m/Y H:i"|default:"Todavía no ingresó" }}</td>
+  </tr>{% endfor %}
+  </tbody></table></div>
+  {% else %}<p class="table-empty">{% if query or state %}No hay cuentas con estos filtros. <a href="{% url 'review:validators' %}">Ver todas</a>{% else %}Todavía no hay validadores. <a href="{% url 'review:validator_create' %}">Creá la primera cuenta</a> para empezar a colaborar.{% endif %}</p>{% endif %}
+  {% if page.paginator.num_pages > 1 %}<nav class="pagination" aria-label="Páginas de validadores">{% if page.has_previous %}<a href="?{{ params }}&page={{ page.previous_page_number }}">Anterior</a>{% endif %}<span>{{ page.number }} / {{ page.paginator.num_pages }}</span>{% if page.has_next %}<a href="?{{ params }}&page={{ page.next_page_number }}">Siguiente</a>{% endif %}</nav>{% endif %}
+</section>
+<p class="metric-help">Abrí una cuenta para editar sus datos, activar o desactivar el acceso y ver sus revisiones. Se cuenta una decisión vigente por persona, norma y lote; los pasajes se muestran por separado. Las cuentas de administradores no se modifican desde este panel.</p>
+{% endblock %}
