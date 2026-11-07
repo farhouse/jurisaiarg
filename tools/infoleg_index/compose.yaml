@@ -43,6 +43,8 @@ services:
     build:
       context: .
     command: ["python", "worker.py", "--init"]
+    healthcheck:
+      disable: true
     environment: &crawler_environment
       POSTGRES_DB: juris_ai
       POSTGRES_USER: juris_ai

@@ -293,3 +293,12 @@ docker compose exec db dropdb -U juris_ai test_crawler_worker
 Usar una base nueva y descartable con prefijo `test_`. Comprueba inicialización
 repetida, resultados parciales, articulado, controles de índice, conservación de
 votos al repetir un rango, fallos de etapa y recuperación tras interrupciones.
+
+### Salud del trabajador
+
+La imagen incorpora `python worker.py --healthcheck`. Retorna 0 si PostgreSQL
+responde y la sesión de este contenedor mantiene el bloqueo de la cola; retorna
+1 si falta la sesión, el bloqueo pertenece a otro contenedor o falla la conexión.
+No crea trabajos ni adquiere bloqueos. El servicio `init` lo desactiva porque es
+un proceso de una sola ejecución. La prueba `test_worker` cubre sesión propia,
+sesión ajena, ausencia y liberación del bloqueo y cierre de conexión.

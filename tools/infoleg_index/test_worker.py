@@ -13,6 +13,23 @@ import worker
 
 @unittest.skipUnless(os.getenv('CRAWLER_TEST_DSN'), 'requiere BD test_ aislada')
 class WorkerIntegrationTest(unittest.TestCase):
+    def test_health_requires_this_worker_connection_and_lock(self):
+        dsn = os.environ['CRAWLER_TEST_DSN']
+        self.assertTrue(conninfo_to_dict(dsn).get('dbname', '').startswith('test_'))
+        self.assertFalse(worker.check_health(dsn))
+        # Otro trabajador no puede hacer pasar este contenedor por saludable.
+        with psycopg.connect(dsn, application_name=worker.worker_name() + '-other', autocommit=True) as other:
+            other.execute('SELECT pg_advisory_lock(72419, 1)')
+            self.assertFalse(worker.check_health(dsn))
+        with psycopg.connect(dsn, application_name=worker.worker_name(), autocommit=True) as own:
+            self.assertFalse(worker.check_health(dsn))
+            own.execute('SELECT pg_advisory_lock(72419, 1)')
+            self.assertTrue(worker.check_health(dsn))
+            own.execute('SELECT pg_advisory_unlock(72419, 1)')
+            self.assertFalse(worker.check_health(dsn))
+            own.execute('SELECT pg_advisory_lock(72419, 1)')
+        self.assertFalse(worker.check_health(dsn))
+
     def test_pipeline_failures_restart_and_review_preservation(self):
         dsn = os.environ['CRAWLER_TEST_DSN']
         self.assertTrue(conninfo_to_dict(dsn).get('dbname', '').startswith('test_'))

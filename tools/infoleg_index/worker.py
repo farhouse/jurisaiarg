@@ -2,6 +2,7 @@
 import argparse
 from pathlib import Path
 import signal
+import socket
 import time
 
 import psycopg
@@ -19,6 +20,23 @@ def database_dsn():
         'host': 'POSTGRES_HOST', 'port': 'POSTGRES_PORT', 'dbname': 'POSTGRES_DB',
         'user': 'POSTGRES_USER', 'password': 'POSTGRES_PASSWORD',
     }.items()})
+
+
+def worker_name():
+    return f'jurisai-worker:{socket.gethostname()}'
+
+
+def check_health(dsn):
+    # Consultar el lock; intentar adquirirlo desde el chequeo competiría con el worker.
+    # El nombre por contenedor evita dar por sano a uno porque otro posee el lock.
+    with psycopg.connect(dsn, connect_timeout=3, options='-c statement_timeout=3000', autocommit=True) as con:
+        return con.execute("""SELECT EXISTS (
+            SELECT 1 FROM pg_locks l JOIN pg_stat_activity a ON a.pid=l.pid
+            WHERE l.locktype='advisory' AND l.classid=72419 AND l.objid=1
+              AND l.objsubid=2 AND l.granted
+              AND l.database=(SELECT oid FROM pg_database WHERE datname=current_database())
+              AND a.application_name=%s
+        )""", (worker_name(),)).fetchone()[0]
 
 
 def initialize(dsn):
@@ -77,16 +95,26 @@ def process_next(con, dsn):
 
 def main():
     cli = argparse.ArgumentParser(description=__doc__)
-    cli.add_argument('--init', action='store_true')
+    mode = cli.add_mutually_exclusive_group()
+    mode.add_argument('--init', action='store_true')
+    mode.add_argument('--healthcheck', action='store_true')
     args = cli.parse_args()
     dsn = database_dsn()
+    if args.healthcheck:
+        try:
+            healthy = check_health(dsn)
+        except psycopg.Error:
+            healthy = False
+        if not healthy:
+            print('Trabajador sin conexión activa y bloqueo propio de la cola.', flush=True)
+        raise SystemExit(0 if healthy else 1)
     if args.init:
         initialize(dsn)
         return
     def stop(*_):
         raise SystemExit(0)
     signal.signal(signal.SIGTERM, stop)
-    with psycopg.connect(dsn) as con:
+    with psycopg.connect(dsn, application_name=worker_name()) as con:
         # ponytail: lock global; separar por proveedor si aparecen otras fuentes.
         if not con.execute('SELECT pg_try_advisory_lock(72419, 1)').fetchone()[0]:
             raise SystemExit('Ya hay otro trabajador activo.')

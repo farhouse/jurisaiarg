@@ -108,3 +108,20 @@ Para fijar una versión, definir `JURISAI_IMAGE_TAG` con el SHA publicado antes
 de ambos comandos. No usar `down -v` al actualizar: elimina el volumen de datos.
 La configuración incluida es para pruebas locales; antes de exponerla a Internet,
 configurar credenciales propias, `DJANGO_SECRET_KEY`, hosts permitidos y HTTPS.
+
+### Healthchecks de las imágenes
+
+La imagen web consulta su login HTTP cada 15 segundos. Mantener `127.0.0.1`
+en `DJANGO_ALLOWED_HOSTS` al usarla fuera de los Compose incluidos. Este chequeo
+comprueba que Django atiende solicitudes; no verifica todo el acceso a datos.
+
+La imagen del crawler comprueba cada 15 segundos que PostgreSQL responde y que
+la sesión identificada con ese contenedor conserva el bloqueo exclusivo de la
+cola. Funciona también con la cola vacía; no mide el avance de cada descarga ni
+la disponibilidad de InfoLEG. El chequeo es de solo lectura y no toma el bloqueo.
+El servicio puntual `init` desactiva el healthcheck heredado y termina con código 0.
+
+Dockhand muestra el estado de salud de los contenedores. Un resultado `unhealthy`
+por sí solo no reinicia un contenedor con Docker Compose; `restart: unless-stopped`
+lo reinicia cuando su proceso termina. Para aplicar una imagen nueva hay que
+hacer pull y recrear los contenedores, no solo reiniciarlos.
