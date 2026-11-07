@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Revisión por ley · JurisAI{% endblock %}
+{% block content %}
+<header class="work-heading"><div><h1>Revisión por ley</h1><p>Qué normas hay y cuántas personas dejaron cada resultado.</p></div><div class="crawl-actions"><a class="button primary" href="{% url 'review:crawl_jobs' %}">Descargar índices</a><a class="button" href="/admin/auth/user/">Administrar validadores</a></div></header>
+<div class="work-summary"><span><strong>{{ law_count }}</strong> normas con control preparado</span><span><strong>{{ vote_count }}</strong> decisiones resueltas</span><span><strong>{{ disagreements }}</strong> normas con desacuerdos</span><span><strong>{{ unreviewed }}</strong> sin revisiones</span></div>
+<p class="muted">Control de la norma completa en el lote seleccionado. Una decisión vigente por persona y norma; cambiarla no suma otro voto. Los pasajes se revisan por separado.</p>
+<form method="get" class="law-filters">
+  <label>Lote<select name="run">{% for batch in runs %}<option value="{{ batch.pk }}" {% if batch.pk == run.pk %}selected{% endif %}>{{ batch.label }}</option>{% endfor %}</select></label>
+  <label>Buscar norma<input name="q" value="{{ query }}" placeholder="Número, título o ID InfoLEG"></label>
+  <label>Resultado<select name="status"><option value="">Todos</option><option value="validada" {% if status == 'validada' %}selected{% endif %}>Con votos correctos</option><option value="rechazada" {% if status == 'rechazada' %}selected{% endif %}>Con votos incorrectos</option><option value="pendiente" {% if status == 'pendiente' %}selected{% endif %}>Con decisiones pendientes</option><option value="desacuerdo" {% if status == 'desacuerdo' %}selected{% endif %}>Con desacuerdos</option><option value="sin_revision" {% if status == 'sin_revision' %}selected{% endif %}>Sin revisiones</option></select></label>
+  <button class="button primary">Consultar</button>
+</form>
+<section class="panel table-panel">
+  <div class="section-title"><h2>{{ page.paginator.count }} normas</h2><span class="muted">{{ run.label|default:"Sin lote" }}</span></div>
+  <div class="table-scroll"><table class="law-results"><caption class="sr-only">Personas por resultado en cada norma</caption><thead><tr><th scope="col">Norma</th><th scope="col">Correcto</th><th scope="col">Incorrecto</th><th scope="col">Pendiente</th><th scope="col">Detalle</th></tr></thead><tbody>
+  {% for law in page %}<tr>
+    <th scope="row"><a href="{% url 'review:law_reviews' law.pk %}">{{ law.norm.display_reference }}</a><small>InfoLEG {{ law.norm.infoleg_id }} · {{ law.norm.display_title|truncatechars:70 }}</small>{% if not law.reviewers_count %}<span class="muted">Sin revisiones</span>{% elif law.approved and law.rejected %}<span class="disagreement">Con desacuerdos</span>{% endif %}</th>
+    <td><a class="vote-count validada" href="{% url 'review:law_reviews' law.pk %}?status=validada" aria-label="{{ law.approved }} personas marcaron correcto {{ law.norm.display_reference }}">{{ law.approved }}</a></td>
+    <td><a class="vote-count rechazada" href="{% url 'review:law_reviews' law.pk %}?status=rechazada" aria-label="{{ law.rejected }} personas marcaron incorrecto {{ law.norm.display_reference }}">{{ law.rejected }}</a></td>
+    <td><a class="vote-count pendiente" href="{% url 'review:law_reviews' law.pk %}?status=pendiente" aria-label="{{ law.pending_votes }} personas dejaron pendiente {{ law.norm.display_reference }}">{{ law.pending_votes }}</a></td>
+    <td><a class="button" href="{% url 'review:law_reviews' law.pk %}">Ver personas</a></td>
+  </tr>{% empty %}<tr><td colspan="5" class="table-empty">{% if law_count %}No hay normas con estos filtros. <a href="{% url 'review:management' %}?run={{ run.pk }}">Limpiar filtros</a>{% else %}No hay controles de índice preparados para este lote. Podés consultar otro lote.{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% if page.paginator.num_pages > 1 %}<nav class="pagination" aria-label="Páginas de normas">{% if page.has_previous %}<a href="?{{ params }}&page={{ page.previous_page_number }}">Anterior</a>{% endif %}<span>{{ page.number }} / {{ page.paginator.num_pages }}</span>{% if page.has_next %}<a href="?{{ params }}&page={{ page.next_page_number }}">Siguiente</a>{% endif %}</nav>{% endif %}
+</section>
+<p class="metric-help">Pendiente cuenta solo decisiones que una persona guardó como pendientes. No incluye a quienes todavía no revisaron. Los resultados describen la revisión del archivo, no la validez jurídica de la norma.</p>
+{% if run %}<details class="panel context"><summary>Descarga y revisión de pasajes · {{ run.label }}</summary>
+<p>{{ run.processed_count }} de {{ run.requested_ids|length }} IDs procesados. {% if run.review_prepared_at %}Preparación terminada el {{ run.review_prepared_at|date:"d/m/Y H:i" }}.{% else %}La clasificación de pasajes con Laya todavía no terminó.{% endif %}</p>
+<div class="operations-grid"><div><h3>Cobertura de descarga</h3><dl class="data-lines">{% for row in downloads %}<div><dt>{{ row.label }}</dt><dd>{{ row.total }}</dd></div>{% endfor %}</dl></div><div><h3>Interpretación de textos</h3><dl class="data-lines"><div><dt>Pasajes preparados</dt><dd>{{ passages }}</dd></div><div><dt>Pasajes pendientes de revisión</dt><dd>{{ pending_passages }}</dd></div><div><dt>Resultados automáticos por auditar</dt><dd>{{ automatic }}</dd></div></dl><a href="{% url 'review:queue' %}?run={{ run.pk }}&kind=pasaje">Abrir revisión de pasajes</a></div></div>
+</details>{% endif %}
+{% endblock %}

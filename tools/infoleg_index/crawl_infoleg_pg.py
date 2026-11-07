@@ -300,44 +300,48 @@ def main():
             )
             run_id = cur.fetchone()[0]
         con.commit()
-        processed = 0
-        failures = 0
-        for infoleg_id in args.ids:
-            with con.cursor() as cur:
-                cur.execute(
-                    """INSERT INTO crawl_items(crawl_run_id, infoleg_id, status)
-                       VALUES (%s,%s,'procesando') RETURNING id""",
-                    (run_id, infoleg_id),
-                )
-                item_id = cur.fetchone()[0]
-            con.commit()
-            error_detail = None
-            try:
-                norm_id, item_status = crawl_one(con, run_id, infoleg_id, args.timeout)
-            except Exception as exc:  # un ID defectuoso no aborta el lote
-                con.rollback()
-                norm_id, item_status = record_failed_item(con, run_id, infoleg_id, exc)
-                error_detail = f"{type(exc).__name__}: {exc}"
-                failures += 1
-            with con.cursor() as cur:
-                cur.execute(
-                    """UPDATE crawl_items SET norm_id=%s, status=%s, error_detail=%s,
-                         finished_at=now() WHERE id=%s""",
-                    (norm_id, item_status, error_detail, item_id),
-                )
-            con.commit()
-            processed += 1
-            time.sleep(max(0, args.sleep + random.uniform(-args.jitter, args.jitter)))
+        crawl_ids(con, run_id, args.ids, args.timeout, args.sleep, args.jitter)
 
+
+def crawl_ids(con, run_id, ids, timeout=30, delay=0.5, jitter=0.2):
+    processed = 0
+    failures = 0
+    for infoleg_id in ids:
         with con.cursor() as cur:
             cur.execute(
-                """UPDATE crawl_runs SET status=%s, finished_at=now(), processed_count=%s,
-                     notes=%s WHERE id=%s""",
-                ("partial" if failures else "ok", processed,
-                 f"failures={failures}" if failures else None, run_id),
+                """INSERT INTO crawl_items(crawl_run_id, infoleg_id, status)
+                   VALUES (%s,%s,'procesando') RETURNING id""",
+                (run_id, infoleg_id),
             )
+            item_id = cur.fetchone()[0]
         con.commit()
+        error_detail = None
+        try:
+            norm_id, item_status = crawl_one(con, run_id, infoleg_id, timeout)
+        except Exception as exc:  # un ID defectuoso no aborta el lote
+            con.rollback()
+            norm_id, item_status = record_failed_item(con, run_id, infoleg_id, exc)
+            error_detail = f"{type(exc).__name__}: {exc}"
+            failures += 1
+        with con.cursor() as cur:
+            cur.execute(
+                """UPDATE crawl_items SET norm_id=%s, status=%s, error_detail=%s,
+                     finished_at=now() WHERE id=%s""",
+                (norm_id, item_status, error_detail, item_id),
+            )
+        processed += 1
+        con.execute("UPDATE crawl_runs SET processed_count=%s WHERE id=%s", (processed, run_id))
+        con.commit()
+        time.sleep(max(0, delay + random.uniform(-jitter, jitter)))
 
+    with con.cursor() as cur:
+        cur.execute(
+            """UPDATE crawl_runs SET status=%s, finished_at=now(), processed_count=%s,
+                 notes=%s WHERE id=%s""",
+            ("partial" if failures else "ok", processed,
+             f"failures={failures}" if failures else None, run_id),
+        )
+    con.commit()
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,8 @@
+# Usar junto con compose.yaml y --no-build; conserva el volumen de datos local.
+services:
+  web:
+    image: ghcr.io/farhouse/jurisaiarg-web:${JURISAI_IMAGE_TAG:-latest}
+  init:
+    image: ghcr.io/farhouse/jurisaiarg-crawler:${JURISAI_IMAGE_TAG:-latest}
+  crawler:
+    image: ghcr.io/farhouse/jurisaiarg-crawler:${JURISAI_IMAGE_TAG:-latest}

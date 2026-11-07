@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Caso {{ task.pk }} · JurisAI{% endblock %}
+{% block content %}
+<a class="back" href="{% url 'review:queue' %}?run={{ task.crawl_run_id }}">Volver a la mesa de revisión</a>
+<header class="work-heading"><div><h1>{{ task.norm.display_reference }}</h1><p>{{ task.get_kind_display }} · InfoLEG {{ task.norm.infoleg_id }} · Caso {{ task.pk }}</p></div><span>{% if task.kind == 'indice' %}Tu decisión: {% endif %}<span class="badge {{ task.review_status }}">{{ task.get_review_status_display }}</span></span></header>
+{% if task.kind == 'indice' %}<p class="notice">Tu revisión es independiente. Cambiarla actualiza tu resultado; las decisiones de otras personas se conservan. {% if user.is_staff %}<a href="{% url 'review:law_reviews' task.pk %}">Ver resultados de esta norma</a>{% endif %}</p>{% endif %}
+<div class="review-layout">
+  <section class="review-main">
+    <article class="panel"><h2>{{ task.norm.display_title }}</h2><div class="source-links"><a href="{{ task.norm.infoleg_url }}" target="_blank" rel="noreferrer">Abrir fuente oficial en InfoLEG</a><a href="{% url 'review:norm_detail' task.norm_id %}" target="_blank" rel="noreferrer">Ver archivo local completo</a></div></article>
+    <article class="panel evidence-panel"><h2>{% if task.kind == 'indice' %}Resultado de la descarga{% else %}Texto a comprobar{% endif %}</h2><div class="source-text">{{ task.source_text|linebreaks }}</div></article>
+    {% if task.kind == 'pasaje' %}
+    <article class="panel"><h2>Evaluación automática</h2><p><strong>{{ task.get_decision_display }}</strong>{% if task.prediction %} · {{ task.prediction }}{% endif %}{% if task.probability != None %} · probabilidad {{ task.probability|floatformat:2 }}{% endif %}</p><ul>{% for reason in task.reasons_display %}<li>{{ reason }}</li>{% endfor %}</ul><p class="muted">El acuerdo automático no equivale a una validación humana ni determina vigencia.</p>
+    {% if task.legal_change %}<p>Parser: {{ task.legal_change.change_type }} · {{ task.legal_change.amending_reference_raw }} · artículo modificador {{ task.legal_change.amending_article_reference }}.</p>{% if task.legal_change.amending_norm %}<a href="{{ task.legal_change.amending_norm.infoleg_url }}" target="_blank" rel="noreferrer">Consultar norma modificadora</a>{% endif %}{% endif %}</article>
+    {% if task.article_version %}<details class="panel context"><summary>Leer el artículo completo y su contexto</summary><p class="muted">Versión {{ task.article_version.norm_version.version_type }}. Esta versión no prueba por sí sola vigencia actual.</p><div class="source-text">{{ task.article_version.text_normalized|linebreaks }}</div></details>{% endif %}
+    {% endif %}
+    {% if history %}<section class="panel"><h2>Historial de decisiones</h2><ol class="decision-history">{% for event in history %}<li><strong>{{ event.username }}</strong> · {{ event.status }} <time>{{ event.created_at|date:"d/m/Y H:i" }}</time>{% if event.notes %}<p>{{ event.notes }}</p>{% endif %}</li>{% endfor %}</ol></section>{% endif %}
+  </section>
+  <aside class="panel review-form"><h2>Tu decisión</h2>
+    {% if task.kind == 'indice' %}<p class="review-intro">Compará la ficha y el texto local con InfoLEG. Comprobá identidad de la norma, artículos y contenido faltante. Si solo hay ficha, verificá que la fuente tampoco ofrezca texto.</p>{% else %}<p class="review-intro">Comprobá que la interpretación coincide con el pasaje completo, las normas y el alcance. Una clasificación correcta no confirma automáticamente la vigencia.</p>{% endif %}
+    <form method="post" class="stack-form">{% csrf_token %}{{ form.revision }}
+      {% for error in form.non_field_errors %}<p class="field-error" role="alert">{{ error }}</p><a href="{% url 'review:task' task.pk %}">Recargar el caso</a>{% endfor %}
+      {% for error in form.revision.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+      <fieldset class="review-status-options"><legend>¿El resultado es correcto?</legend>{% for radio in form.status %}<label class="review-status-option">{{ radio.tag }}<span>{{ radio.choice_label }}</span></label>{% endfor %}{% for error in form.status.errors %}<p class="field-error">{{ error }}</p>{% endfor %}</fieldset>
+      <label for="{{ form.notes.id_for_label }}">Observaciones</label>{{ form.notes }}<small class="muted">Obligatorias si marcás el caso como incorrecto. La corrección del dato se realiza por separado.</small>{% for error in form.notes.errors %}<p class="field-error" role="alert">{{ error }}</p>{% endfor %}
+      <button name="continue" value="1" class="button primary">Guardar y continuar</button><button class="button">Guardar y volver a la cola</button>
+    </form><p class="audit">Tu decisión se registra como {{ user.username }}.{% if task.reviewed_by %}<br>Última revisión: {{ task.reviewed_by }} · {{ task.reviewed_at|date:"d/m H:i" }}.{% endif %}</p>
+  </aside>
+</div>
+{% endblock %}

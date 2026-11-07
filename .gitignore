@@ -1,7 +1,13 @@
 __pycache__/
 .venv/
+.venv-laya/
+tools/infoleg_index/.laya-cache/
+tools/infoleg_index/laya-results/
 *.py[cod]
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
 web/staticfiles/
+web/.local-access.json
+web/.preview/
+.impeccable/review/

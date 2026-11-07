@@ -1,17 +1,6 @@
 from django.contrib import admin
-from django.utils import timezone
 
 from .models import LegalChange
-
-
-@admin.action(description="Marcar como validadas")
-def validate_changes(modeladmin, request, queryset):
-    queryset.update(review_status="validada", reviewed_at=timezone.now(), reviewed_by=request.user.get_username())
-
-
-@admin.action(description="Marcar como rechazadas")
-def reject_changes(modeladmin, request, queryset):
-    queryset.update(review_status="rechazada", reviewed_at=timezone.now(), reviewed_by=request.user.get_username())
 
 
 @admin.register(LegalChange)
@@ -32,9 +21,14 @@ class LegalChangeAdmin(admin.ModelAdmin):
         "parser_version", "confidence", "fingerprint", "created_at", "updated_at",
         "reviewed_at", "reviewed_by",
     )
-    actions = (validate_changes, reject_changes)
+    actions = None
 
-    def save_model(self, request, obj, form, change):
-        obj.reviewed_at = timezone.now()
-        obj.reviewed_by = request.user.get_username()
-        super().save_model(request, obj, form, change)
+    # Las decisiones pasan por el validador para conservar auditoría y conflictos.
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

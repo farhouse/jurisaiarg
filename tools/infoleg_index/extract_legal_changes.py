@@ -25,11 +25,11 @@ def load_norm_index(cur) -> dict[tuple[str, str], list[int]]:
     return index
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--dsn", required=True)
     parser.add_argument("--infoleg-ids", type=int, nargs="*")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     with psycopg.connect(args.dsn) as con:
         with con.cursor() as cur:

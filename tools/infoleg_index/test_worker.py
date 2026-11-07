@@ -1,0 +1,69 @@
+"""Integración con BD descartable; ejecutar según README, nunca sobre datos reales."""
+import os
+import unittest
+import urllib.error
+import uuid
+from unittest.mock import patch
+
+import psycopg
+from psycopg.conninfo import conninfo_to_dict
+
+import worker
+
+
+@unittest.skipUnless(os.getenv('CRAWLER_TEST_DSN'), 'requiere BD test_ aislada')
+class WorkerIntegrationTest(unittest.TestCase):
+    def test_pipeline_failures_restart_and_review_preservation(self):
+        dsn = os.environ['CRAWLER_TEST_DSN']
+        self.assertTrue(conninfo_to_dict(dsn).get('dbname', '').startswith('test_'))
+        worker.initialize(dsn)
+        worker.initialize(dsn)  # También sobre volúmenes existentes.
+        with psycopg.connect(dsn) as con:
+            def enqueue(start, end):
+                return con.execute('''INSERT INTO crawl_jobs(submission_id,start_id,end_id,requested_by)
+                    VALUES (%s,%s,%s,'test') RETURNING id''', (uuid.uuid4(), start, end)).fetchone()[0]
+
+            def fetch(url, timeout):
+                if 'id=202' in url:
+                    raise urllib.error.URLError('fallo simulado')
+                html = '''<div id="Textos_Completos"><strong>Ley 900 HONORABLE CONGRESO</strong>
+                  <span class="destacado">PRUEBA AISLADA</span>
+                  <a href="anexos/201/texact.htm">Texto actualizado de la norma</a></div>'''
+                if 'texact.htm' in url:
+                    html = '<p>Artículo 1º — Texto de prueba sin cambios.</p>'
+                return 200, html, html.encode()
+
+            first = enqueue(201, 202)
+            con.commit()
+            # Solo se simula la red: crawler, parser y preparación usan PostgreSQL real.
+            with patch('crawl_infoleg_pg.fetch', side_effect=fetch), patch('crawl_infoleg_pg.time.sleep'):
+                self.assertTrue(worker.process_next(con, dsn))
+            status, run_id = con.execute('SELECT status,crawl_run_id FROM crawl_jobs WHERE id=%s', (first,)).fetchone()
+            self.assertEqual(status, 'partial')
+            self.assertEqual(con.execute('SELECT processed_count FROM crawl_runs WHERE id=%s', (run_id,)).fetchone()[0], 2)
+            self.assertEqual(con.execute('SELECT count(*) FROM review_tasks WHERE crawl_run_id=%s', (run_id,)).fetchone()[0], 2)
+            self.assertEqual(con.execute('SELECT count(*) FROM article_versions').fetchone()[0], 1)
+            task = con.execute('SELECT id FROM review_tasks WHERE crawl_run_id=%s ORDER BY id LIMIT 1', (run_id,)).fetchone()[0]
+            con.execute("INSERT INTO norm_reviews(task_id,user_id,username,status,notes) VALUES (%s,1,'test','validada','evidencia')", (task,))
+            con.commit()
+            second = enqueue(201, 201)
+            con.commit()
+            with patch('crawl_infoleg_pg.fetch', side_effect=fetch), patch('crawl_infoleg_pg.time.sleep'):
+                worker.process_next(con, dsn)
+            self.assertEqual(con.execute('SELECT status FROM crawl_jobs WHERE id=%s', (second,)).fetchone()[0], 'done')
+            self.assertEqual(con.execute('SELECT status,notes FROM norm_reviews WHERE task_id=%s', (task,)).fetchone(), ('validada', 'evidencia'))
+            failed = enqueue(203, 203)
+            con.commit()
+            with patch('worker.crawl_ids', side_effect=RuntimeError('simulado')):
+                worker.process_next(con, dsn)
+            self.assertEqual(con.execute('SELECT status FROM crawl_jobs WHERE id=%s', (failed,)).fetchone()[0], 'failed')
+            con.execute("UPDATE crawl_jobs SET status='running' WHERE id=%s", (failed,))
+            queued = enqueue(204, 204)
+            con.commit()
+            worker.recover_interrupted(con)
+            self.assertEqual(con.execute('SELECT status FROM crawl_jobs WHERE id=%s', (failed,)).fetchone()[0], 'failed')
+            self.assertEqual(con.execute('SELECT status FROM crawl_jobs WHERE id=%s', (queued,)).fetchone()[0], 'queued')
+
+
+if __name__ == '__main__':
+    unittest.main()

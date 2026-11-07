@@ -13,6 +13,7 @@ from django.utils import timezone
 from .forms import ReviewForm
 from .legal_search import parse_legal_query
 from .models import Article, ArticleVersion, LegalChange, Norm
+from .workflow import validator_required
 
 
 def normalized_article_label(value):
@@ -135,17 +136,13 @@ def filtered_changes(request):
     return queryset
 
 
+def home(request):
+    return render(request, "review/home.html")
+
+
 @login_required
 def dashboard(request):
-    totals = LegalChange.objects.aggregate(
-        total=Count("id"),
-        pending=Count("id", filter=Q(review_status="pendiente")),
-        validated=Count("id", filter=Q(review_status="validada")),
-        rejected=Count("id", filter=Q(review_status="rechazada")),
-        unresolved=Count("id", filter=Q(amending_norm__isnull=True)),
-    )
-    by_type = LegalChange.objects.values("change_type").annotate(total=Count("id")).order_by("change_type")
-    return render(request, "review/dashboard.html", {"totals": totals, "by_type": by_type})
+    return redirect("review:management" if request.user.is_staff else "review:queue")
 
 
 @login_required
@@ -178,11 +175,14 @@ def change_detail(request, pk):
     })
 
 
-@login_required
+@validator_required
 def review_change(request, pk):
     if request.method != "POST":
         raise Http404
     change = get_object_or_404(LegalChange, pk=pk)
+    task = change.reviewtask_set.order_by("-id").first()
+    if task:
+        return redirect("review:task", pk=task.pk)
     form = ReviewForm(request.POST, instance=change)
     if form.is_valid():
         reviewed = form.save(commit=False)

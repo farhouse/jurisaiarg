@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}JurisAI · Las leyes al alcance de todos{% endblock %}
+{% block content %}
+<header class="manifesto-opening">
+  <h1>Las leyes son de todos.<br>Entenderlas también debería estar al alcance de todos.</h1>
+  <p>Construimos JurisAI para que el pueblo pueda conocer mejor sus derechos y para que la información jurídica pueda consultarse, comprenderse y utilizarse de nuevas maneras.</p>
+  <div class="manifesto-actions"><a class="button primary" href="#manifiesto">Leer nuestro manifiesto</a><a href="#colaborar">Conocer cómo colaborar</a></div>
+</header>
+<div class="guide-layout" id="manifiesto">
+  <nav class="guide-index" aria-label="Contenido del manifiesto">
+    <strong>En qué creemos</strong>
+    <a href="#origen">Por qué existe JurisAI</a>
+    <a href="#proposito">Lo que queremos construir</a>
+    <a href="#abierto">Abierto y gratuito</a>
+    <a href="#confianza">Información que se pueda comprobar</a>
+    <a href="#colaborar">Un trabajo colectivo</a>
+  </nav>
+  <article class="validator-guide manifesto-body">
+    <section id="origen">
+      <h2>Por qué existe JurisAI</h2>
+      <p>JurisAI nació después de un juicio perdido que su impulsor vivió como un profundo atropello. Durante ese proceso, la dificultad para acceder a la información jurídica se volvió parte del problema: encontrar una norma, entender sus relaciones con otras y reconstruir qué decía exigía un esfuerzo que no debería recaer por completo en quien busca conocer sus derechos.</p>
+      <p>Esa experiencia puso en evidencia una barrera que queremos ayudar a reducir. Muchas veces sabemos describir lo que nos pasa, pero no conocemos el número de la ley, el término técnico o la referencia exacta que necesitamos para buscar.</p>
+      <p><strong>Creemos que conocer las leyes no debería depender de saber de antemano cómo encontrarlas.</strong></p>
+    </section>
+    <section id="proposito">
+      <h2>Buscar por lo que queremos entender</h2>
+      <p>Queremos que una persona pueda acercarse a las leyes desde sus preguntas, con sus propias palabras. Nuestro objetivo es desarrollar búsquedas por significado que ayuden a encontrar normas relacionadas con un tema, aunque quien consulta no recuerde sus números ni utilice lenguaje jurídico.</p>
+      <p>También queremos que esa información pueda utilizarse de manera programática: una API para desarrolladores y una conexión MCP para que los modelos de lenguaje puedan consultar las fuentes del proyecto. Así, otras personas podrán crear herramientas sobre una base compartida.</p>
+      <p>La búsqueda por significado, la API y el MCP son objetivos en desarrollo. Hoy estamos construyendo y revisando el archivo de normas que les servirá de base.</p>
+    </section>
+    <section id="abierto">
+      <h2>Abierto y gratuito, por principio</h2>
+      <p>Queremos construir un proyecto abierto y gratuito. El acceso a la información jurídica y la posibilidad de comprenderla son el centro de JurisAI.</p>
+      <p>Podremos explorar servicios complementarios para sostener el proyecto. Esa posibilidad debe ser compatible con el compromiso de mantener abierta y gratuita su base de acceso al conocimiento jurídico.</p>
+      <p>Estamos en una etapa inicial. La publicación del código, los datos y sus condiciones de reutilización deberá concretar ese compromiso; no damos esos pasos por terminados.</p>
+    </section>
+    <section id="confianza">
+      <h2>La información debe poder comprobarse</h2>
+      <p>La tecnología puede ayudar a reunir documentos, encontrar relaciones y señalar posibles cambios. También puede equivocarse. Por eso conservamos la referencia a la fuente y distinguimos los resultados automáticos de las decisiones de revisión humana.</p>
+      <p>Queremos que quien consulte pueda ver de dónde sale una afirmación, reconocer qué está revisado y saber qué sigue pendiente. Una herramienta útil debe permitir detectar y corregir sus errores.</p>
+      <p>JurisAI busca ayudar a comprender y consultar las leyes. No sustituye las fuentes oficiales ni el asesoramiento profesional ante un caso concreto.</p>
+    </section>
+    <section id="colaborar">
+      <h2>Este trabajo se construye con otras personas</h2>
+      <p>Para hacer un archivo confiable necesitamos personas que comparen lo descargado con la fuente, detecten contenido faltante y revisen las interpretaciones. Hay tareas de comprobación documental y otras que requieren conocimientos jurídicos.</p>
+      <p>Si te interesa participar, empezá por conocer la tarea en nuestra guía. En esta etapa, un administrador habilita cada cuenta de colaboración; todavía no hay inscripción automática.</p>
+      <div class="manifesto-actions"><a class="button primary" href="{% url 'review:guide' %}">Conocer la tarea del validador</a><a href="{% url 'review:queue' %}">Ya tengo cuenta: ir a validar</a></div>
+      <p class="manifesto-signature">JurisAI<br><span>Un proyecto para acercar las leyes a las personas.</span></p>
+    </section>
+  </article>
+</div>
+{% endblock %}

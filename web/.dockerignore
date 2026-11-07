@@ -1,0 +1,8 @@
+.local-access.json
+.preview
+.env*
+__pycache__
+*.pyc
+.venv*
+staticfiles
+*.sqlite*

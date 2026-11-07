@@ -160,3 +160,141 @@ class LegalChange(models.Model):
 
     def __str__(self):
         return f"{self.change_type}: {self.affected_norm.display_reference} art. {self.affected_article.article_label}"
+
+
+class CrawlRun(models.Model):
+    from django.contrib.postgres.fields import ArrayField
+
+    requested_ids = ArrayField(models.IntegerField(), null=True)
+    started_at = models.DateTimeField()
+    finished_at = models.DateTimeField(null=True)
+    status = models.TextField()
+    processed_count = models.IntegerField()
+    notes = models.TextField(null=True)
+    review_prepared_at = models.DateTimeField(null=True)
+
+    class Meta:
+        managed = False
+        db_table = "crawl_runs"
+        ordering = ["-id"]
+
+    @property
+    def label(self):
+        ids = self.requested_ids or []
+        return f"Lote {self.pk} · IDs {min(ids)}–{max(ids)}" if ids else f"Lote {self.pk}"
+
+
+class CrawlItem(models.Model):
+    crawl_run = models.ForeignKey(CrawlRun, models.DO_NOTHING, related_name="items")
+    infoleg_id = models.IntegerField()
+    norm = models.ForeignKey(Norm, models.DO_NOTHING, null=True)
+    status = models.TextField()
+    error_detail = models.TextField(null=True)
+
+    class Meta:
+        managed = False
+        db_table = "crawl_items"
+
+
+class CrawlJob(models.Model):
+    submission_id = models.UUIDField(unique=True)
+    start_id = models.IntegerField()
+    end_id = models.IntegerField()
+    requested_by = models.TextField()
+    status = models.TextField(default="queued", choices=[
+        ("queued", "En cola"), ("running", "En curso"), ("done", "Finalizado"),
+        ("partial", "Finalizado con errores de descarga"), ("failed", "Interrumpido o fallido"),
+    ])
+    stage = models.TextField(default="queued", choices=[
+        ("queued", "Esperando al trabajador"), ("download", "Descargando índices"),
+        ("parser", "Ejecutando el parser"), ("review", "Preparando controles de índice"),
+        ("finished", "Controles de índice disponibles"),
+    ])
+    crawl_run = models.ForeignKey(CrawlRun, models.DO_NOTHING, null=True)
+    created_at = models.DateTimeField()
+    started_at = models.DateTimeField(null=True)
+    finished_at = models.DateTimeField(null=True)
+    error = models.TextField(default="")
+
+    class Meta:
+        managed = False
+        db_table = "crawl_jobs"
+        ordering = ["-id"]
+
+    @property
+    def total(self):
+        return self.end_id - self.start_id + 1
+
+    @property
+    def active(self):
+        return self.status in ("queued", "running")
+
+
+class ReviewTask(models.Model):
+    crawl_run = models.ForeignKey(CrawlRun, models.DO_NOTHING)
+    norm = models.ForeignKey(Norm, models.DO_NOTHING)
+    article_version = models.ForeignKey(ArticleVersion, models.DO_NOTHING, null=True)
+    legal_change = models.ForeignKey(LegalChange, models.DO_NOTHING, null=True)
+    kind = models.TextField(choices=[("indice", "Calidad del índice"), ("pasaje", "Interpretación del texto")])
+    source_text = models.TextField()
+    decision = models.TextField(choices=[("revision", "Requiere revisión"), ("aceptacion_automatica", "Acuerdo automático"), ("sin_cambio_detectado", "Sin cambio detectado")])
+    prediction = models.TextField(null=True)
+    probability = models.FloatField(null=True)
+    reasons = models.JSONField(default=list)
+    model_result = models.JSONField(default=dict)
+    fingerprint = models.TextField(unique=True)
+    review_status = models.TextField(default="pendiente", choices=[("pendiente", "Pendiente"), ("validada", "Correcto"), ("rechazada", "Incorrecto")])
+    review_notes = models.TextField(default="")
+    reviewed_by = models.TextField(null=True)
+    reviewed_at = models.DateTimeField(null=True)
+    revision = models.IntegerField(default=0)
+    created_at = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = "review_tasks"
+
+    @property
+    def reasons_display(self):
+        labels = {
+            "control_del_indice": "Comprobar la ficha y el articulado descargado",
+            "probabilidad_baja": "Probabilidad menor a 0,75",
+            "desacuerdo_parser_laya": "El parser y Laya no coinciden",
+            "sin_extraccion_estructurada": "Laya detecta un cambio que el parser no pudo extraer",
+            "alcance_parcial_sin_identificar": "Falta identificar el inciso o párrafo exacto",
+            "multiples_cambios": "El texto contiene varios cambios",
+            "clasificacion_ambigua": "La clasificación es ambigua",
+            "texto_truncado_o_no_verificado": "El modelo no pudo leer todo el texto",
+            "norma_sin_resolver": "La referencia no se resolvió a una norma local única",
+            "error_modelo": "Falló la clasificación; revisar el texto manualmente",
+            "fragmento_dividido": "Artículo extenso dividido: revisar también su contexto",
+        }
+        return [labels.get(reason, reason.replace("_", " ").capitalize()) for reason in self.reasons]
+
+
+class NormReview(models.Model):
+    task = models.ForeignKey(ReviewTask, models.DO_NOTHING, related_name="votes")
+    user_id = models.BigIntegerField()
+    username = models.TextField()
+    status = models.TextField(choices=ReviewTask._meta.get_field("review_status").choices)
+    notes = models.TextField(default="")
+    revision = models.IntegerField(default=1)
+    updated_at = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = "norm_reviews"
+        constraints = [models.UniqueConstraint(fields=["task", "user_id"], name="norm_reviews_task_user_unique")]
+
+
+class ReviewEvent(models.Model):
+    task = models.ForeignKey(ReviewTask, models.DO_NOTHING, related_name="events")
+    username = models.TextField()
+    previous_status = models.TextField()
+    status = models.TextField()
+    notes = models.TextField()
+    created_at = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = "review_events"

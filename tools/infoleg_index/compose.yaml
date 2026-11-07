@@ -6,10 +6,10 @@ services:
       POSTGRES_USER: juris_ai
       POSTGRES_PASSWORD: juris_ai_local
     ports:
-      - "55432:5432"
+      - "127.0.0.1:55432:5432"
     volumes:
       - juris_ai_pgdata:/var/lib/postgresql/data
-      - ./schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U juris_ai -d juris_ai"]
       interval: 2s
@@ -17,6 +17,7 @@ services:
       retries: 20
 
   web:
+    image: juris-ai-web:local
     build:
       context: ../../web
     environment:
@@ -26,15 +27,40 @@ services:
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432
       DJANGO_SECRET_KEY: local-development-only-change-me
-      DJANGO_DEBUG: "true"
-      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+      DJANGO_DEBUG: "false"
+      DJANGO_ALLOWED_HOSTS: "${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,192.168.1.152}"
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
-    volumes:
-      - ../../web:/app
+      init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  init:
+    image: juris-ai-crawler:local
+    build:
+      context: .
+    command: ["python", "worker.py", "--init"]
+    environment: &crawler_environment
+      POSTGRES_DB: juris_ai
+      POSTGRES_USER: juris_ai
+      POSTGRES_PASSWORD: juris_ai_local
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+    depends_on:
+      db:
+        condition: service_healthy
+
+  crawler:
+    image: juris-ai-crawler:local
+    environment: *crawler_environment
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    init: true
 
 volumes:
   juris_ai_pgdata:

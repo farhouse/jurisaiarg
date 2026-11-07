@@ -1,0 +1,12 @@
+{"id":"synthetic-01","text":"(Artículo sustituido por art. 272 del Decreto N° 70/2023 B.O. 21/12/2023)","expected":"sustituye"}
+{"id":"synthetic-02","text":"(Artículo derogado por art. 154 de la Ley N° 24.013 B.O. 17/12/91)","expected":"deroga"}
+{"id":"synthetic-03","text":"(Artículo incorporado por art. 2 de la Ley N° 27.700 B.O. 1/2/2023)","expected":"incorpora"}
+{"id":"synthetic-04","text":"(Artículo modificado por art. 3 de la Ley N° 27.700 B.O. 1/2/2023)","expected":"modifica"}
+{"id":"synthetic-05","text":"Sustitúyese el artículo 5 de la Ley N° 20.744 por el siguiente texto.","expected":"sustituye"}
+{"id":"synthetic-06","text":"Derógase el artículo 8 de la Ley N° 24.013.","expected":"deroga"}
+{"id":"synthetic-07","text":"Incorpórase como artículo 12 bis de la Ley N° 27.700 el siguiente texto.","expected":"incorpora"}
+{"id":"synthetic-08","text":"Ver Ley 20.744 y sus modificatorias.","expected":"ninguno"}
+{"id":"synthetic-09","text":"El empleador deberá entregar un certificado al trabajador.","expected":"ninguno"}
+{"id":"synthetic-10","text":"El proyecto propone derogar el artículo 5, pero todavía no fue aprobado.","expected":"ninguno"}
+{"id":"synthetic-11","text":"Derógase el artículo 5 e incorpórase un nuevo artículo 6 bis.","expected":"ambiguo"}
+{"id":"synthetic-12","text":"El presente artículo no deroga ni modifica las disposiciones de la Ley N° 20.744.","expected":"ninguno"}

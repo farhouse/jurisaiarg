@@ -6,16 +6,25 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}JurisAI Review{% endblock %}</title>
   <link rel="stylesheet" href="{% static 'app.css' %}">
+  {% block extra_head %}{% endblock %}
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="{% url 'review:norm_search' %}">JurisAI <span>Archivo jurídico</span></a>
+    <a class="brand" href="{% url 'review:home' %}">JurisAI <span>Archivo jurídico</span></a>
     {% if user.is_authenticated %}
       <nav>
         <a href="{% url 'review:norm_search' %}">Explorar leyes</a>
-        <a href="{% url 'review:dashboard' %}">Control del parser</a>
-        {% if user.is_staff %}<a href="/admin/">Admin</a>{% endif %}
+        <a href="{% url 'review:queue' %}">Validar</a>
+        <a href="{% url 'review:guide' %}">Guía del validador</a>
+        {% if user.is_staff %}<a href="{% url 'review:management' %}">Gestión</a><a href="/admin/auth/user/">Usuarios</a>{% endif %}
+        <span class="session-user">{{ user.username }}</span>
         <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="link-button">Salir</button></form>
+      </nav>
+    {% else %}
+      <nav aria-label="Navegación principal">
+        <a href="{% url 'review:home' %}#manifiesto">Manifiesto</a>
+        <a href="{% url 'review:guide' %}">Cómo colaborar</a>
+        <a href="{% url 'login' %}">Ingresar</a>
       </nav>
     {% endif %}
   </header>

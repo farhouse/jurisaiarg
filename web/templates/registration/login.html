@@ -2,11 +2,11 @@
 {% block title %}Ingresar · JurisAI{% endblock %}
 {% block content %}
 <section class="login-card">
-  <p class="eyebrow">Acceso interno</p>
   <h1>Revisión jurídica</h1>
-  <p class="muted">Ingresá para validar las relaciones extraídas desde InfoLEG.</p>
+  <p class="muted">Ingresá con tu cuenta. Cada decisión queda registrada con tu usuario.</p>
   <form method="post" class="stack-form">
     {% csrf_token %}
+    <input type="hidden" name="next" value="{{ next }}">
     {{ form.as_p }}
     <button class="button primary" type="submit">Ingresar</button>
   </form>

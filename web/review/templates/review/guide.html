@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Guía del validador · JurisAI{% endblock %}
+{% block content %}
+<header class="work-heading"><div><h1>Guía del validador</h1><p>Tu trabajo es comprobar que lo descargado y lo interpretado coincidan con la fuente. Cada decisión debe poder entenderse y verificarse después.</p></div><a class="button primary" href="{% url 'review:queue' %}">Ir a validar</a></header>
+<div class="guide-layout">
+  <nav class="guide-index" aria-label="Contenido de la guía">
+    <strong>En esta guía</strong>
+    <a href="#empezar">Antes de empezar</a>
+    <a href="#indices">Revisar un índice</a>
+    <a href="#textos">Revisar un texto</a>
+    <a href="#decision">Elegir una decisión</a>
+    <a href="#observaciones">Escribir observaciones</a>
+    <a href="#automaticos">Entender la evaluación automática</a>
+    <a href="#guardar">Guardar y seguir</a>
+  </nav>
+  <article class="validator-guide">
+    <section id="empezar">
+      <h2>Antes de empezar</h2>
+      <p>Usá tu cuenta personal: la aplicación registra quién revisó cada caso y cuándo. Necesitás poder abrir InfoLEG y comparar su contenido con el archivo local. Si no podés resolver una interpretación, dejá el caso pendiente con una observación.</p>
+      <ol>
+        <li>Entrá a <strong>Validar</strong> y elegí el lote asignado.</li>
+        <li>En <strong>Mostrar</strong>, elegí «Pendientes de revisión». Para comenzar por las descargas, elegí «Calidad del índice» en <strong>Trabajo</strong> y pulsá «Aplicar».</li>
+        <li>Abrí un caso con «Revisar». Compará «Abrir fuente oficial en InfoLEG» con «Ver archivo local completo».</li>
+      </ol>
+      <p>Hay dos tareas distintas: <strong>calidad del índice</strong> revisa la descarga de una norma; <strong>interpretación del texto</strong> revisa un pasaje. Aprobar el índice no aprueba sus pasajes.</p>
+      <p>En los índices, cada persona deja su propia decisión. Una norma puede aparecer en tu cola aunque otra persona ya la haya revisado. Cambiar tu resultado no borra los resultados ajenos ni suma un segundo voto.</p>
+    </section>
+    <section id="indices">
+      <h2>Qué comprobar en un índice</h2>
+      <p>Un índice es la ficha identificada por un ID de InfoLEG y el contenido que descargamos desde ella.</p>
+      <ul>
+        <li><strong>Identidad:</strong> el tipo y número de norma, el título y las fechas disponibles corresponden a la misma ficha oficial.</li>
+        <li><strong>Versión:</strong> compará texto original con original, o actualizado con actualizado. Una diferencia entre versiones no demuestra por sí sola un error.</li>
+        <li><strong>Contenido:</strong> revisá el articulado completo, su orden y numeración; buscá artículos omitidos, repetidos, cortados o mezclados, y anexos que falten si la fuente los ofrece.</li>
+        <li><strong>Disponibilidad:</strong> si descargamos solo la ficha, comprobá si InfoLEG ofrece un enlace al texto que se haya perdido.</li>
+      </ul>
+      <p>«Sin ficha reconocible» no confirma que el ID no exista. Si la fuente no abre o no podés comprobar qué debería contener, dejalo pendiente. Si abre y el archivo local perdió contenido, marcalo incorrecto e indicá qué falta.</p>
+    </section>
+    <section id="textos">
+      <h2>Qué comprobar en un texto</h2>
+      <ol>
+        <li><strong>Leé el pasaje y su contexto.</strong> Desplegá «Leer el artículo completo y su contexto». Si está dividido, no decidas solo por el fragmento.</li>
+        <li><strong>Contrastá la interpretación.</strong> ¿El texto realmente dice lo que indica la evaluación: sustitución, derogación, incorporación u otra categoría? Una mención o una propuesta no demuestra que ese cambio se haya producido.</li>
+        <li><strong>Verificá la relación del parser, si aparece.</strong> Comprobá norma modificadora, artículo que modifica, artículo afectado y alcance. Distinguir el artículo completo de un inciso o párrafo es parte de la revisión.</li>
+        <li><strong>Consultá la fuente.</strong> Usá la norma modificadora enlazada cuando esté disponible. Si falta una referencia necesaria o el alcance no se puede resolver, registrá la duda.</li>
+      </ol>
+      <p>Un resultado puede acertar la categoría y equivocarse en la norma o el alcance. En ese caso no está completamente correcto. Esta revisión tampoco acredita por sí sola la vigencia actual de una norma.</p>
+    </section>
+    <section id="decision">
+      <h2>Cuándo elegir cada decisión</h2>
+      <dl class="guide-decisions">
+        <dt>Correcto</dt><dd>Comprobaste la evidencia necesaria y el resultado coincide con la fuente. Para un índice, la descarga es fiel; para un pasaje, la interpretación y las referencias mostradas son correctas.</dd>
+        <dt>Incorrecto</dt><dd>Encontraste un error concreto y verificable. Es obligatorio explicar qué está mal y, si lo sabés, cuál sería el dato correcto. Ejemplo: falta un artículo que sí aparece en la misma versión oficial.</dd>
+        <dt>Dejar pendiente</dt><dd>No hay evidencia suficiente para decidir: la fuente no abre, falta contexto o necesitás otra revisión. Explicá qué falta comprobar para que otra persona pueda retomar el caso.</dd>
+      </dl>
+      <p><strong>Una duda no equivale a un error confirmado.</strong> Tampoco apruebes un caso solo porque el modelo tenga un puntaje alto.</p>
+    </section>
+    <section id="observaciones">
+      <h2>Cómo dejar una observación útil</h2>
+      <p>Indicá <strong>dónde está el problema, qué viste en la fuente y qué falta corregir o comprobar</strong>. Incluí artículo, inciso o párrafo, la versión consultada y el enlace cuando ayuden a ubicarlo.</p>
+      <p class="muted">Ejemplos ilustrativos; no describen hallazgos del lote.</p>
+      <ul>
+        <li><strong>Error de descarga:</strong> «En la versión original falta el artículo 4; la fuente lo muestra entre los artículos 3 y 5. Agregar el texto omitido. Fuente: [enlace]».</li>
+        <li><strong>Error de interpretación:</strong> «La nota sustituye únicamente el inciso b), pero la relación indica todo el artículo. Corregir el alcance. Fuente: [enlace]».</li>
+        <li><strong>Duda pendiente:</strong> «No pude abrir el texto de la norma modificadora. Falta comprobar el artículo citado antes de decidir».</li>
+      </ul>
+      <p>Evitar «está mal» sin explicación permite que el equipo corrija el dato. <strong>Marcar incorrecto no edita el contenido:</strong> registra el problema; la corrección se realiza por separado.</p>
+    </section>
+    <section id="automaticos">
+      <h2>Qué significa la evaluación automática</h2>
+      <p>El sistema combina el parser con Laya. Un puntaje inferior a <strong>0,75</strong> envía el pasaje a revisión. También se revisan desacuerdos, referencias sin resolver, alcances parciales y textos divididos o truncados, aunque el puntaje sea alto.</p>
+      <p>El puntaje es una señal del modelo; <strong>0,75 no garantiza un 75 % de acierto</strong>. «Sin cambio detectado» tampoco prueba que no exista un cambio.</p>
+      <p>Los resultados automáticos se consultan con «Auditar automáticos» y se revisan con los mismos criterios. No se cuentan como validaciones humanas hasta que una persona guarda una decisión.</p>
+    </section>
+    <section id="guardar">
+      <h2>Guardar, continuar y retomar</h2>
+      <ul>
+        <li><strong>Guardar y continuar</strong> registra la decisión y abre el siguiente pendiente del lote, si hay uno. Ese siguiente caso puede ser de otro tipo: el botón no conserva los filtros de la cola.</li>
+        <li><strong>Guardar y volver a la cola</strong> registra la decisión y vuelve al lote. Podés volver a elegir el filtro de trabajo que necesites.</li>
+        <li><strong>Mis decisiones</strong> permite consultar tus casos resueltos. Podés cambiar una decisión o reabrirla con «Dejar pendiente»; el historial se conserva.</li>
+        <li>Si tu revisión de un índice cambió desde otra pestaña, la aplicación te pedirá recargarla. Otra persona puede votar sobre el mismo índice sin reemplazar tu decisión. En los pasajes, el control de cambios sigue siendo compartido.</li>
+      </ul>
+      <p>El administrador ve cada norma y cuántas personas la marcaron correcta, incorrecta o pendiente. Puede abrirla para consultar quién decidió, cuándo y qué observó. Se cuenta una decisión vigente por persona y norma dentro de cada lote; los pasajes se muestran por separado. Un pendiente guardado cuenta como pendiente, mientras que no haber revisado todavía no suma ningún voto.</p>
+      <a class="button primary" href="{% url 'review:queue' %}">Empezar a revisar</a>
+    </section>
+  </article>
+</div>
+{% endblock %}
