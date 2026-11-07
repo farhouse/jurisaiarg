@@ -37,6 +37,9 @@ Abrir `http://localhost:8000`. En una instalación nueva, crear el administrador
 docker compose -f tools/infoleg_index/compose.yaml exec web python manage.py createsuperuser
 ```
 
+Desde **Gestión → Administrar validadores** se crean cuentas, se administra su
+acceso y se consulta su actividad sin salir de la plataforma.
+
 Desde **Gestión → Descargar índices** se ejecuta descarga, parser y preparación
 de controles de índice en segundo plano. Laya se ejecuta por separado; ver
 [la documentación del crawler](tools/infoleg_index/README.md) y
@@ -58,7 +61,7 @@ pegar el YAML y configurar estas variables en el panel del stack:
 | `JURISAI_PORT` | Opcional: puerto HTTP, por defecto `8000`. |
 
 Para generar cada secreto por separado se puede usar `openssl rand -hex 32`.
-El archivo fija la versión publicada `3a914bc`; `JURISAI_IMAGE_TAG` permite
+El archivo fija la versión publicada `1203f13`; `JURISAI_IMAGE_TAG` permite
 seleccionar otro SHA publicado o `latest`. Las imágenes son Linux/amd64.
 No hay que clonar código, compilar, montar carpetas ni configurar acceso a GHCR.
 El servicio `init` termina con código 0 al preparar el esquema: es normal.
