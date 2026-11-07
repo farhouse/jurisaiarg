@@ -50,6 +50,8 @@ services:
       DJANGO_CSRF_TRUSTED_ORIGINS: "${DJANGO_CSRF_TRUSTED_ORIGINS:-}"
       DJANGO_TRUST_PROXY_HEADERS: "${DJANGO_TRUST_PROXY_HEADERS:-false}"
       DJANGO_SECURE_COOKIES: "${DJANGO_SECURE_COOKIES:-false}"
+    volumes:
+      - juris_ai_models:/models
     ports:
       - "${JURISAI_BIND_IP:-0.0.0.0}:${JURISAI_PORT:-8000}:8000"
     depends_on:
@@ -63,6 +65,8 @@ services:
     platform: linux/amd64
     restart: unless-stopped
     init: true
+    volumes:
+      - juris_ai_models:/models
     environment: *database-environment
     depends_on:
       init:
@@ -70,3 +74,4 @@ services:
 
 volumes:
   juris_ai_pgdata:
+  juris_ai_models:

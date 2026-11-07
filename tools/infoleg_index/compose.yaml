@@ -32,6 +32,8 @@ services:
       DJANGO_CSRF_TRUSTED_ORIGINS: "${DJANGO_CSRF_TRUSTED_ORIGINS:-}"
       DJANGO_TRUST_PROXY_HEADERS: "${DJANGO_TRUST_PROXY_HEADERS:-false}"
       DJANGO_SECURE_COOKIES: "${DJANGO_SECURE_COOKIES:-false}"
+    volumes:
+      - juris_ai_models:/models
     ports:
       - "8000:8000"
     depends_on:
@@ -44,7 +46,8 @@ services:
   init:
     image: juris-ai-crawler:local
     build:
-      context: .
+      context: ../..
+      dockerfile: tools/infoleg_index/Dockerfile
     command: ["python", "worker.py", "--init"]
     healthcheck:
       disable: true
@@ -61,6 +64,8 @@ services:
   crawler:
     image: juris-ai-crawler:local
     environment: *crawler_environment
+    volumes:
+      - juris_ai_models:/models
     depends_on:
       init:
         condition: service_completed_successfully
@@ -69,3 +74,4 @@ services:
 
 volumes:
   juris_ai_pgdata:
+  juris_ai_models:

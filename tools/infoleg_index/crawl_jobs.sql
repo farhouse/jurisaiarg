@@ -15,3 +15,7 @@ CREATE TABLE IF NOT EXISTS crawl_jobs (
   CHECK (end_id >= start_id AND end_id::bigint - start_id < 1000)
 );
 CREATE INDEX IF NOT EXISTS idx_crawl_jobs_queue ON crawl_jobs(id) WHERE status='queued';
+-- El valor por defecto conserva el comportamiento de solicitudes históricas.
+ALTER TABLE crawl_jobs ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'download'
+  CHECK (mode IN ('download','full','process'));
+ALTER TABLE crawl_jobs ADD COLUMN IF NOT EXISTS progress JSONB NOT NULL DEFAULT '{}';

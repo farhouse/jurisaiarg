@@ -1,0 +1,9 @@
+*
+!web/
+!web/review/
+!web/review/embedding.py
+!tools/
+!tools/infoleg_index/
+!tools/infoleg_index/*.py
+!tools/infoleg_index/*.sql
+!tools/infoleg_index/requirements*.txt

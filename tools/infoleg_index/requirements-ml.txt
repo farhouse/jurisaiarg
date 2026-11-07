@@ -1,0 +1,4 @@
+# Torch CPU se instala por separado desde el índice oficial en las imágenes.
+laya==0.4.13
+transformers==4.57.6
+numpy==1.26.4

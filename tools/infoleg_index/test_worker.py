@@ -63,6 +63,18 @@ class WorkerIntegrationTest(unittest.TestCase):
             task = con.execute('SELECT id FROM review_tasks WHERE crawl_run_id=%s ORDER BY id LIMIT 1', (run_id,)).fetchone()[0]
             con.execute("INSERT INTO norm_reviews(task_id,user_id,username,status,notes) VALUES (%s,1,'test','validada','evidencia')", (task,))
             con.commit()
+            # Fallo en clasificación: retomar el mismo lote sin acceder a la red.
+            process_id = con.execute("INSERT INTO crawl_jobs(submission_id,start_id,end_id,requested_by,mode,crawl_run_id) VALUES (%s,201,202,'test','process',%s) RETURNING id", (uuid.uuid4(), run_id)).fetchone()[0]
+            con.commit()
+            with patch('worker.crawl_ids', side_effect=AssertionError('no descargar')), patch('worker.run_stage', side_effect=RuntimeError('modelo')):
+                worker.process_next(con, dsn)
+            self.assertEqual(con.execute('SELECT status FROM crawl_jobs WHERE id=%s', (process_id,)).fetchone()[0], 'failed')
+            con.execute("UPDATE crawl_jobs SET status='queued' WHERE id=%s", (process_id,))
+            con.commit()
+            with patch('worker.crawl_ids', side_effect=AssertionError('no descargar')), patch('worker.run_stage') as stage:
+                worker.process_next(con, dsn)
+                self.assertEqual([call.args[0] for call in stage.call_args_list], ['classify', 'embeddings'])
+            self.assertEqual(con.execute('SELECT crawl_run_id,status FROM crawl_jobs WHERE id=%s', (process_id,)).fetchone(), (run_id, 'partial'))
             second = enqueue(201, 201)
             con.commit()
             with patch('crawl_infoleg_pg.fetch', side_effect=fetch), patch('crawl_infoleg_pg.time.sleep'):

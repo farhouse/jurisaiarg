@@ -4,6 +4,8 @@ from pathlib import Path
 import signal
 import socket
 import time
+import subprocess
+import sys
 
 import psycopg
 from psycopg.conninfo import make_conninfo
@@ -41,7 +43,7 @@ def check_health(dsn):
 
 def initialize(dsn):
     with psycopg.connect(dsn) as con:
-        for name in ('schema.sql', 'review_tasks.sql', 'crawl_jobs.sql'):
+        for name in ('schema.sql', 'review_tasks.sql', 'crawl_jobs.sql', 'enrichment.sql'):
             con.execute(Path(__file__).with_name(name).read_text())
 
 
@@ -63,22 +65,36 @@ def process_next(con, dsn):
         con.commit()
         return False
     ids = list(range(job['start_id'], job['end_id'] + 1))
-    run_id = con.execute("""INSERT INTO crawl_runs(source_id,requested_ids)
+    run_id = job['crawl_run_id'] if job['mode'] == 'process' else con.execute("""INSERT INTO crawl_runs(source_id,requested_ids)
         SELECT id,%s FROM sources WHERE code='infoleg' RETURNING id""", (ids,)).fetchone()[0]
-    con.execute("""UPDATE crawl_jobs SET status='running', stage='download',
+    con.execute("""UPDATE crawl_jobs SET status='running',
         started_at=now(), crawl_run_id=%s WHERE id=%s""", (run_id, job['id']))
     con.commit()
     try:
-        crawl_ids(con, run_id, ids)
+        if job['mode'] != 'process':
+            con.execute("UPDATE crawl_jobs SET stage='download' WHERE id=%s", (job['id'],))
+            con.commit()
+            crawl_ids(con, run_id, ids)
+        else:
+            row = con.execute("SELECT requested_ids FROM crawl_runs WHERE id=%s AND finished_at IS NOT NULL AND status IN ('ok','partial')", (run_id,)).fetchone()
+            if not row:
+                raise ValueError('El lote debe haber terminado la descarga')
+            ids = row[0]
         con.execute("UPDATE crawl_jobs SET stage='parser' WHERE id=%s", (job['id'],))
         con.commit()
         parse_changes(['--dsn', dsn, '--infoleg-ids', *map(str, ids)])
+        if job['mode'] != 'download':
+            # Cada proceso termina antes de cargar el siguiente modelo y libera su RAM.
+            for stage in ('classify', 'embeddings'):
+                con.execute("UPDATE crawl_jobs SET stage=%s WHERE id=%s", (stage, job['id']))
+                con.commit()
+                run_stage(stage, job['id'], run_id, dsn)
         con.execute("UPDATE crawl_jobs SET stage='review' WHERE id=%s", (job['id'],))
         con.commit()
         prepare_review(['--dsn', dsn, '--run-id', str(run_id), '--indices-only'])
         status = con.execute("SELECT status FROM crawl_runs WHERE id=%s", (run_id,)).fetchone()[0]
         con.execute("UPDATE crawl_jobs SET status=%s, stage='finished', finished_at=now() WHERE id=%s",
-                    ('partial' if status == 'partial' else 'done', job['id']))
+                    ('done' if status == 'ok' else 'partial', job['id']))
         con.commit()
     except BaseException as exc:
         con.rollback()
@@ -91,6 +107,23 @@ def process_next(con, dsn):
         if not isinstance(exc, Exception):
             raise
     return True
+
+
+def run_stage(stage, job_id, run_id, dsn):
+    env = {**os.environ, 'PIPELINE_DSN': dsn}
+    child = subprocess.Popen([sys.executable, str(Path(__file__).with_name('enrich.py')),
+                              stage, str(run_id), str(job_id)], env=env)
+    try:
+        if child.wait() != 0:
+            raise RuntimeError(f'Falló {stage}')
+    finally:
+        if child.poll() is None:
+            child.terminate()
+            try:
+                child.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait()
 
 
 def main():

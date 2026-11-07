@@ -42,7 +42,7 @@ def save_task(con, run_id, norm_id, kind, text, result, article_id=None, change_
     con.commit()
 
 
-def main(argv=None):
+def main(argv=None, router=None):
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("--dsn", required=True)
     cli.add_argument("--run-id", required=True, type=int)
@@ -58,15 +58,24 @@ def main(argv=None):
         items = con.execute("""SELECT n.id,n.infoleg_id,n.canonical_title,n.subject,n.article_count,ci.status
             FROM crawl_items ci JOIN norms n ON n.id=ci.norm_id WHERE ci.crawl_run_id=%s ORDER BY ci.infoleg_id""", (args.run_id,)).fetchall()
         for norm_id, infoleg_id, title, subject, article_count, status in items:
-            text = f"InfoLEG {infoleg_id}\n{title or subject or 'Sin título'}\nEstado de descarga: {status}\nArtículos disponibles: {article_count}"
+            identity = con.execute('SELECT norm_type,number,issuing_body,summary FROM norms WHERE id=%s', (norm_id,)).fetchone()
+            articles = con.execute('''SELECT a.article_label,nv.version_type,av.text_normalized
+                FROM article_versions av JOIN articles a ON a.id=av.article_id
+                JOIN norm_versions nv ON nv.id=av.norm_version_id WHERE a.norm_id=%s
+                AND nv.id IN (SELECT DISTINCT ON (version_type) id FROM norm_versions
+                  WHERE norm_id=a.norm_id ORDER BY version_type,id DESC)
+                ORDER BY nv.id,a.ordinal,av.id''', (norm_id,)).fetchall()
+            text = f"InfoLEG {infoleg_id}\n{title or subject or 'Sin título'}\nEstado de descarga: {status.replace('_', ' ')}\nArtículos disponibles: {article_count}"
             save_task(con, args.run_id, norm_id, "indice", text,
-                      {"decision": "revision", "review_reasons": ["control_del_indice"]},
+                      {"decision": "revision", "review_reasons": ["control_del_indice"],
+                       "identity": dict(zip(('type','number','issuer','summary'), identity)),
+                       "articles": [dict(zip(('label','version','text'), row)) for row in articles]},
                       key=f"index:{args.run_id}:{norm_id}")
         if args.indices_only:
-            print(f"indices={len(items)}; Laya pendiente", flush=True)
+            print(f"indices={len(items)}; controles preparados (sin ejecutar Laya en esta etapa)", flush=True)
             return
         from laya import Router
-        router = Router(device="cpu", max_loaded=1, revision=MODEL_REVISION)
+        router = router or Router(device="cpu", max_loaded=1, revision=MODEL_REVISION)
         rows = con.execute("""WITH selected AS (
                 SELECT DISTINCT ON (nv.norm_id) nv.id,nv.norm_id FROM norm_versions nv
                 WHERE nv.norm_id IN (SELECT norm_id FROM crawl_items WHERE crawl_run_id=%s)
@@ -79,6 +88,8 @@ def main(argv=None):
         for av_id, norm_id, infoleg_id, article_key, text in rows:
             for fragment, divided in passages(text):
                 key = hashlib.sha256(f"{args.run_id}|{av_id}|{MODEL_REVISION}|{TRIAGE_VERSION}|0.75|{fragment}".encode()).hexdigest()
+                # Reintentar errores antiguos sin tocar decisiones humanas.
+                con.execute("DELETE FROM review_tasks WHERE fingerprint=%s AND model_result ? 'error' AND revision=0 AND NOT EXISTS (SELECT 1 FROM review_events WHERE task_id=review_tasks.id)", (key,))
                 if con.execute("SELECT 1 FROM review_tasks WHERE fingerprint=%s", (key,)).fetchone():
                     con.commit()
                     counts["already_present"] += 1
@@ -93,10 +104,7 @@ def main(argv=None):
                     if change:
                         change_id, resolved = change[0], bool(change[1])
                 con.commit()
-                try:
-                    result = classify(router, {"text": fragment, "infoleg_id": infoleg_id})
-                except Exception as exc:
-                    result = {"decision": "revision", "review_reasons": ["error_modelo"], "error": str(exc)}
+                result = classify(router, {"text": fragment, "infoleg_id": infoleg_id})
                 if candidates and not resolved:
                     result["review_reasons"].append("norma_sin_resolver")
                 if divided:
