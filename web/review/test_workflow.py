@@ -185,3 +185,24 @@ class WorkflowTest(TransactionTestCase):
         self.assertEqual(self.client.get(url + "?state=inactive").context["page"].paginator.count, 1)
         self.assertEqual(self.client.post(detail, {"is_active": "on"}).status_code, 302)
         self.assertTrue(session.login(username="maria", password=payload["password1"]))
+
+    def test_z_topics_and_snapshot_are_reviewable_and_escaped(self):
+        user = User.objects.create_user('topic-reviewer', is_staff=True)
+        self.client.force_login(user)
+        now = timezone.now()
+        run = CrawlRun.objects.create(requested_ids=[9876], started_at=now, status='ok', processed_count=1)
+        norm = Norm.objects.create(infoleg_id=9876, norm_type='Ley', number='demo', general_status='desconocida', index_status='completa', article_count=1)
+        task = ReviewTask.objects.create(crawl_run=run, norm=norm, kind='pasaje', source_text='<script>evidencia</script>', decision='revision', fingerprint='topic-review', created_at=now,
+            model_result={'category':'temas','matters':[{'label':'Laboral','score':.9}], 'concepts':['Salario']})
+        page = self.client.get(f'/validar/{task.pk}/')
+        self.assertContains(page, 'Tu tarea: revisar materias y conceptos')
+        self.assertContains(page, 'Laboral')
+        self.assertContains(page, '&lt;script&gt;')
+        self.assertNotContains(page, '<script>evidencia')
+        self.assertEqual(self.client.post(f'/validar/{task.pk}/', {'status':'rechazada','revision':0,'notes':'El tema central es tributario.'}).status_code, 302)
+        task.refresh_from_db()
+        self.assertEqual(task.review_status, 'rechazada')
+        task.kind='indice'
+        task.model_result={'articles':[{'label':'1','version':'original','text':'Texto guardado inmutable'}]}
+        task.save()
+        self.assertContains(self.client.get(f'/validar/{task.pk}/'), 'Texto guardado inmutable')

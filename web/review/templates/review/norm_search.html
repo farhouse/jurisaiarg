@@ -2,14 +2,16 @@
 {% block title %}Explorar normas · JurisAI{% endblock %}
 {% block content %}
 <section class="explorer-hero">
-  <p class="eyebrow">Archivo jurídico argentino</p>
   <h1>Buscar y consultar normas</h1>
   <p>Buscá por número, título, tema o palabras contenidas en sus artículos.</p>
   <form method="get" class="law-search">
-    <input name="q" value="{{ query }}" placeholder="Ej.: contrato de trabajo, 20.744, sociedades…" autofocus>
+    <label class="search-mode">Buscar por<select name="mode"><option value="text" {% if mode != "semantic" %}selected{% endif %}>Palabras o número</option><option value="semantic" {% if mode == "semantic" %}selected{% endif %}>Significado (experimental)</option></select></label>
+    <input aria-label="Consulta" maxlength="1000" name="q" value="{{ query }}" placeholder="Ej.: contrato de trabajo, 20.744, sociedades…" autofocus>
     <button class="button primary" type="submit">Buscar</button>
   </form>
   {% if query and parsed_query.filters %}<div class="interpreted-query"><span>Interpretamos:</span>{% for label, value in parsed_query.filters %}<strong>{{ label }}: {{ value }}</strong>{% endfor %}{% if parsed_query.text %}<strong>Texto: {{ parsed_query.text }}</strong>{% endif %}</div>{% endif %}
+  {% if mode == 'semantic' %}<p class="muted">Hasta 40 normas ordenadas por similitud del texto. Solo incluye documentos procesados; la similitud no acredita relevancia jurídica ni vigencia.</p>{% endif %}
+  {% if semantic_error %}<p role="alert" class="notice">{{ semantic_error }}</p>{% endif %}
 </section>
 <div class="results-heading"><h2>{% if query %}Resultados para “{{ query }}”{% else %}Normas disponibles{% endif %}</h2><span>{{ page.paginator.count }} normas</span></div>
 <section class="norm-grid">
@@ -19,9 +21,10 @@
     <h2><a href="{% url 'review:norm_detail' norm.id %}">{{ norm.display_reference }}</a></h2>
     <h3>{{ norm.display_title }}</h3>
     {% if norm.subject %}<p>{{ norm.subject|truncatewords:38 }}</p>{% elif norm.summary %}<p>{{ norm.summary|truncatewords:38 }}</p>{% endif %}
+    {% if norm.semantic_evidence %}<details><summary>Ver texto que motivó el resultado</summary><p>{{ norm.semantic_evidence }}</p></details>{% endif %}
     <footer><span>{{ norm.article_count }} artículos</span><a href="{% url 'review:norm_detail' norm.id %}">Consultar norma →</a></footer>
   </article>
-  {% empty %}<div class="empty-state"><h2>No encontramos normas</h2><p>Probá con otro número o términos más generales.</p></div>{% endfor %}
+  {% empty %}<div class="empty-state"><h2>No encontramos normas</h2><p>{% if mode == "semantic" %}Puede que todavía no haya documentos procesados para búsqueda semántica. Probá por palabras o pedí al administrador que procese un lote.{% else %}Probá con otro número o términos más generales.{% endif %}</p></div>{% endfor %}
 </section>
-{% if page.paginator.num_pages > 1 %}<nav class="pagination">{% if page.has_previous %}<a href="?q={{ query|urlencode }}&page={{ page.previous_page_number }}">Anterior</a>{% endif %}<span>Página {{ page.number }} de {{ page.paginator.num_pages }}</span>{% if page.has_next %}<a href="?q={{ query|urlencode }}&page={{ page.next_page_number }}">Siguiente</a>{% endif %}</nav>{% endif %}
+{% if page.paginator.num_pages > 1 %}<nav class="pagination">{% if page.has_previous %}<a href="?mode={{ mode }}&q={{ query|urlencode }}&page={{ page.previous_page_number }}">Anterior</a>{% endif %}<span>Página {{ page.number }} de {{ page.paginator.num_pages }}</span>{% if page.has_next %}<a href="?mode={{ mode }}&q={{ query|urlencode }}&page={{ page.next_page_number }}">Siguiente</a>{% endif %}</nav>{% endif %}
 {% endblock %}

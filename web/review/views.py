@@ -6,13 +6,14 @@ from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.contrib.postgres.search import SearchQuery, SearchRank
 from django.db.models import Count, Prefetch, Q
+from django.db import connection
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
 from .forms import ReviewForm
 from .legal_search import parse_legal_query
-from .models import Article, ArticleVersion, LegalChange, Norm
+from .models import Article, ArticleVersion, LegalChange, Norm, ReviewTask
 from .workflow import validator_required
 
 
@@ -45,6 +46,24 @@ def resolve_amending_article(change):
 @login_required
 def norm_search(request):
     query = request.GET.get("q", "").strip()
+    mode = request.GET.get('mode', 'text')
+    if mode == 'semantic' and query:
+        from .semantic import search
+        error = ''
+        try:
+            matches = search(query)
+        except ValueError:
+            matches, error = [], 'La consulta es demasiado larga. Probá con una frase más corta.'
+        except (OSError, RuntimeError):
+            matches, error = [], 'El modelo local no está disponible. Probá la búsqueda por palabras y avisá al administrador.'
+        found = Norm.objects.in_bulk([pk for pk, _ in matches])
+        results = []
+        for pk, evidence in matches:
+            if pk in found:
+                found[pk].semantic_evidence = evidence
+                results.append(found[pk])
+        return render(request, 'review/norm_search.html', {'page': Paginator(results, 20).get_page(request.GET.get('page')),
+            'query': query, 'mode': mode, 'semantic_error': error})
     norms = Norm.objects.all()
     parsed_query = parse_legal_query(query)
     if query:
@@ -73,7 +92,7 @@ def norm_search(request):
     else:
         norms = norms.exclude(index_status__in=["vacia", "pendiente"]).order_by("infoleg_id")
     page = Paginator(norms, 20).get_page(request.GET.get("page"))
-    return render(request, "review/norm_search.html", {"page": page, "query": query, "parsed_query": parsed_query})
+    return render(request, "review/norm_search.html", {"page": page, "query": query, "parsed_query": parsed_query, 'mode': mode})
 
 
 @login_required
@@ -102,7 +121,20 @@ def norm_detail(request, pk):
         if versions:
             article.display_version = next((v for v in versions if v.norm_version.is_current), versions[0])
             articles.append(article)
-    return render(request, "review/norm_detail.html", {"norm": norm, "articles": articles})
+    with connection.cursor() as cursor:
+        cursor.execute('''SELECT rt.id FROM review_tasks rt JOIN search_chunks sc
+          ON sc.id::text=rt.model_result->>'source_chunk_id'
+          LEFT JOIN article_versions av ON av.id=sc.article_version_id
+          WHERE rt.norm_id=%s AND rt.model_result->>'category'='temas'
+          AND rt.model_result->>'source_hash'=md5(sc.content)
+          AND (av.id IS NULL OR av.norm_version_id=(SELECT nv.id FROM norm_versions nv WHERE nv.norm_id=sc.norm_id ORDER BY (nv.version_type='actualizada') DESC,nv.id DESC LIMIT 1))
+          AND rt.crawl_run_id=(SELECT max(t.crawl_run_id) FROM review_tasks t
+            WHERE t.norm_id=rt.norm_id AND t.model_result->>'category'='temas')
+          ORDER BY rt.id''', [pk])
+        ids = [row[0] for row in cursor.fetchall()]
+    topics = list(ReviewTask.objects.filter(pk__in=ids).exclude(review_status='rechazada').order_by('id'))
+    tags = sorted({m['label'] for task in topics for m in task.model_result.get('matters', [])} | {label for task in topics for label in task.model_result.get('concepts', [])})
+    return render(request, "review/norm_detail.html", {"norm": norm, "articles": articles, 'topics': topics, 'tags': tags})
 
 
 def filtered_changes(request):

@@ -302,3 +302,19 @@ responde y la sesión de este contenedor mantiene el bloqueo de la cola; retorna
 No crea trabajos ni adquiere bloqueos. El servicio `init` lo desactiva porque es
 un proceso de una sola ejecución. La prueba `test_worker` cubre sesión propia,
 sesión ajena, ausencia y liberación del bloqueo y cierre de conexión.
+
+
+## Pipeline por etapas
+
+Ver la sección «Procesamiento local por etapas» del [README principal](../../README.md).
+El build del crawler ahora usa la raíz del repositorio como contexto, porque comparte
+`web/review/embedding.py` con la aplicación. Desde esta carpeta: `docker compose build init`.
+Las dependencias de inferencia son `requirements-ml.txt` y Torch CPU 2.6.0.
+La instalación mínima sigue sirviendo para descargar sin modelos.
+
+Pruebas de integración: crear una base descartable cuyo nombre empiece por `test_`,
+configurar `CRAWLER_TEST_DSN` con su DSN y ejecutar `python -m unittest discover -p 'test_*.py'`.
+No usar la base del archivo jurídico. `test_worker.py` y `test_enrich.py` prueban
+reintentos, conservación de votos, idempotencia, actualización de contenido y
+escritura atómica; simulan red e inferencia. La prueba real con modelos del README
+se ejecutó aparte sobre dos artículos copiados a otra base temporal.

@@ -12,7 +12,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import CrawlRun, LegalChange, NormReview, ReviewEvent, ReviewTask
+from .models import ArticleVersion, CrawlRun, LegalChange, NormReview, ReviewEvent, ReviewTask
 
 
 def validator_required(view):
@@ -150,7 +150,13 @@ def task_detail(request, pk):
                 return redirect(reverse("review:queue") + f"?run={task.crawl_run_id}")
         elif code == 200:
             code = 400
-    return render(request, "review/task.html", {"task": task, "form": form, "history": task.events.order_by("-id")[:10]}, status=code)
+    articles = task.model_result.get('articles', [])
+    if task.kind == 'indice' and 'articles' not in task.model_result:
+        articles = [{'label': av.article.article_label, 'version': av.norm_version.version_type,
+                     'text': av.text_normalized} for av in ArticleVersion.objects.filter(
+                         article__norm=task.norm).select_related('article', 'norm_version').order_by('norm_version_id','article__ordinal')]
+    return render(request, "review/task.html", {"task": task, "form": form, 'articles': articles,
+        'snapshot': 'articles' in task.model_result, "history": task.events.order_by("-id")[:10]}, status=code)
 
 
 STATUS_LABELS = {

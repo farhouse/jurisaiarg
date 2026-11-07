@@ -6,17 +6,36 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_GET
 
-from .models import CrawlJob, Norm
+from .models import CrawlJob, CrawlRun, Norm
 from .workflow import staff_required
 
 
 class CrawlForm(forms.Form):
-    start_id = forms.IntegerField(label="Desde el índice", min_value=1, max_value=2147483647)
-    end_id = forms.IntegerField(label="Hasta el índice", min_value=1, max_value=2147483647)
+    mode = forms.ChoiceField(label='Qué querés hacer', choices=CrawlJob.MODES, initial='full')
+    run = forms.ModelChoiceField(label='Lote descargado', queryset=CrawlRun.objects.none(), required=False)
+    start_id = forms.IntegerField(label="Desde el índice", min_value=1, max_value=2147483647, required=False)
+    end_id = forms.IntegerField(label="Hasta el índice", min_value=1, max_value=2147483647, required=False)
     submission_id = forms.UUIDField(widget=forms.HiddenInput)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['run'].queryset = CrawlRun.objects.filter(finished_at__isnull=False, status__in=["ok", "partial"]).exclude(requested_ids=[]).exclude(requested_ids=None)
+        self.fields['run'].label_from_instance = lambda run: run.label
 
     def clean(self):
         data = super().clean()
+        if data.get('mode') == 'process':
+            run = data.get('run')
+            if not run or not run.requested_ids:
+                self.add_error('run', 'Elegí un lote cuya descarga haya terminado.')
+            elif max(run.requested_ids) - min(run.requested_ids) >= 1000:
+                self.add_error('run', 'Este lote supera el límite de 1.000 índices.')
+            else:
+                data['start_id'], data['end_id'] = min(run.requested_ids), max(run.requested_ids)
+            return data
+        for field in ('start_id', 'end_id'):
+            if data.get(field) is None:
+                self.add_error(field, 'Indicá el rango que querés descargar.')
         start, end = data.get("start_id"), data.get("end_id")
         if start is not None and end is not None:
             if end < start:
@@ -36,6 +55,7 @@ def jobs(request):
         # UUID único: doble clic o reenvío del mismo formulario no duplican el trabajo.
         job, _ = CrawlJob.objects.get_or_create(submission_id=data["submission_id"], defaults={
             "start_id": data["start_id"], "end_id": data["end_id"],
+            "mode": data['mode'], "crawl_run": data['run'] if data['mode'] == 'process' else None,
             "requested_by": request.user.get_username(), "created_at": timezone.now(),
         })
         return redirect("review:crawl_job", pk=job.pk)

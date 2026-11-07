@@ -29,7 +29,7 @@ class CrawlerAdminTest(TransactionTestCase):
         self.assertEqual(self.client.get(url).status_code, 302)
         validator = User.objects.create_user('crawler-validator-test')
         self.client.force_login(validator)
-        payload = {'start_id': 201, 'end_id': 250, 'submission_id': uuid.uuid4()}
+        payload = {'mode': 'full', 'start_id': 201, 'end_id': 250, 'submission_id': uuid.uuid4()}
         self.assertEqual(self.client.post(url, payload).status_code, 403)
         admin = User.objects.create_user('crawler-admin-test', is_staff=True)
         self.client.force_login(admin)
@@ -48,6 +48,13 @@ class CrawlerAdminTest(TransactionTestCase):
         self.assertEqual((job.start_id, job.end_id, job.total, job.requested_by), (201, 250, 50, admin.username))
         self.assertContains(self.client.get(response.url), 'En cola')
         self.assertContains(self.client.get(response.url), 'http-equiv="refresh"')
+        from django.utils import timezone
+        run = CrawlRun.objects.create(requested_ids=[201,202], started_at=timezone.now(), finished_at=timezone.now(), status='ok', processed_count=2)
+        process = {'mode': 'process', 'run': run.pk, 'submission_id': uuid.uuid4()}
+        response_process = self.client.post(url, process)
+        self.assertEqual(response_process.status_code, 302)
+        self.assertEqual(CrawlJob.objects.get(mode='process').crawl_run_id, run.pk)
+        self.assertEqual(self.client.post(url, {**process, 'run': 999999, 'submission_id': uuid.uuid4()}).status_code, 400)
         job.status = 'failed'
         job.error = '<script>unsafe</script>'
         job.save()

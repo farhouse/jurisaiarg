@@ -7,6 +7,8 @@
   <div class="law-facts"><span>Estado de la fuente<strong>{{ norm.index_status }}</strong></span><span>Artículos disponibles<strong>{{ articles|length }}</strong></span><a class="infoleg-button" target="_blank" rel="noreferrer" href="{{ norm.infoleg_url }}">Ver fuente en InfoLEG ↗</a></div>
 </header>
 {% if norm.summary %}<section class="panel law-summary"><span class="label">Resumen</span><p>{{ norm.summary }}</p></section>{% endif %}
+<section class="panel"><h2>Materias y conceptos</h2><p>Etiquetas por fragmento; pueden combinar varias materias. No determinan el fuero competente. Abrí cada fragmento para ver su estado de revisión.</p><ul class="topic-tags">{% for tag in tags %}<li>{{ tag }}</li>{% endfor %}</ul>
+{% for topic in topics %}<details><summary>{% for matter in topic.model_result.matters %}{{ matter.label }}{% if not forloop.last %}, {% endif %}{% empty %}Sin materia propuesta{% endfor %} · {{ topic.get_review_status_display }}</summary><ul class="topic-tags">{% for concept in topic.model_result.concepts %}<li>{{ concept }}</li>{% endfor %}</ul><p>{{ topic.source_text }}</p><a href="{% url 'review:task' topic.pk %}">Revisar esta propuesta</a></details>{% empty %}<p class="muted">Todavía no hay propuestas disponibles para este contenido. Se generan al procesar el lote.</p>{% endfor %}</section>
 <div class="law-layout">
   <main class="articles-list">
     <div class="results-heading"><h2>Texto articulado</h2><span>{{ articles|length }} artículos</span></div>

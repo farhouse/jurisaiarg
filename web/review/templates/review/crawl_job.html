@@ -2,16 +2,18 @@
 {% block title %}Descarga {{ job.start_id }}–{{ job.end_id }} · JurisAI{% endblock %}
 {% block extra_head %}{% if job.active %}<meta http-equiv="refresh" content="10">{% endif %}{% endblock %}
 {% block content %}
-<a class="back" href="{% url 'review:crawl_jobs' %}">Volver a descargas</a>
+<a class="back" href="{% url 'review:crawl_jobs' %}">Volver a solicitudes</a>
 <header class="work-heading"><div><h1>Índices {{ job.start_id }}–{{ job.end_id }}</h1><p>Solicitado por {{ job.requested_by }} el {{ job.created_at|date:"d/m/Y H:i" }}.</p></div><a class="button" href="{% url 'review:crawl_job' job.pk %}">Actualizar estado</a></header>
 <section class="panel">
-  <h2>{{ job.get_status_display }}</h2>
+  <h2>{{ job.get_status_display }}</h2><p>{{ job.get_mode_display }}</p>
   <p>{% if job.status == 'failed' %}Última etapa: {% endif %}{{ job.get_stage_display }}.</p>
   <p><strong>{{ processed }} de {{ job.total }}</strong> índices procesados. Este contador incluye los intentos con error.</p>
   <progress class="crawl-progress" value="{{ processed }}" max="{{ job.total }}" aria-label="Índices procesados">{{ processed }} / {{ job.total }}</progress>
+  {% if job.progress.classify %}<p>Clasificación temática: {{ job.progress.classify.done }} / {{ job.progress.classify.total }} textos. Después se contrastan las relaciones con el parser.</p>{% endif %}
+  {% if job.progress.embeddings %}<p>Búsqueda semántica: {{ job.progress.embeddings.done }} / {{ job.progress.embeddings.total }} textos.</p>{% endif %}
   {% if job.active %}<p class="muted">Esta página se actualiza cada 10 segundos. Podés cerrarla y volver desde el historial.{% if job.status == 'queued' %} Si no avanza, comprobá que el trabajador esté encendido.{% endif %}</p>{% endif %}
-  {% if job.error %}<p class="message" role="alert">{{ job.error }}</p>{% endif %}
-  {% if job.status == 'done' or job.status == 'partial' %}<p>Los controles de índice ya están disponibles para los validadores. <strong>Laya pendiente:</strong> este trabajo no clasifica pasajes.</p>{% endif %}
+  {% if job.error %}<p class="message" role="alert">{{ job.error }}</p><p>Si la descarga terminó, elegí «Procesar un lote descargado» para retomar. Si falló la descarga, solicitá los IDs que faltan.</p>{% endif %}
+  {% if job.status == 'done' or job.status == 'partial' %}<p>{% if job.mode == 'download' %}Descarga terminada. Podés revisar la fidelidad de la copia o volver a Solicitudes y elegir «Procesar un lote descargado» para clasificarla.{% else %}La clasificación y la búsqueda semántica están preparadas para los documentos disponibles. Las propuestas del modelo quedan diferenciadas de las decisiones humanas.{% endif %}</p>{% endif %}
   {% if job.crawl_run %}<p><a class="button" href="{% url 'review:management' %}?run={{ job.crawl_run_id }}">Ver lote en Gestión</a></p>{% endif %}
 </section>
 {% if errors %}<section class="panel"><h2>Índices con error</h2><p>Podés solicitar nuevamente estos IDs desde Descargas.</p><ul>{% for item in errors %}<li>InfoLEG {{ item.infoleg_id }}: {{ item.status }} — {{ item.error_detail }}</li>{% endfor %}</ul></section>{% endif %}

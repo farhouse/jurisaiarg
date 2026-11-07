@@ -107,7 +107,7 @@ Para actualizar: usar este Compose, quitar una etiqueta antigua de
 `DJANGO_SECRET_KEY`, la contraseña de PostgreSQL y el volumen existente.
 Volver a abrir el formulario de login antes de enviarlo. No es necesario crear
 nuevamente el superusuario. La protección CSRF permanece activa.
-Laya conserva su ejecución separada.
+El procesamiento local por etapas se describe en la sección siguiente; requiere las imágenes de esta versión, todavía sin publicar.
 Referencia de la interfaz: [manual de Dockhand](https://dockhand.pro/manual/#creating-stacks).
 
 ### Publicación y uso con Docker Compose
@@ -153,3 +153,77 @@ Dockhand muestra el estado de salud de los contenedores. Un resultado `unhealthy
 por sí solo no reinicia un contenedor con Docker Compose; `restart: unless-stopped`
 lo reinicia cuando su proceso termina. Para aplicar una imagen nueva hay que
 hacer pull y recrear los contenedores, no solo reiniciarlos.
+
+
+### Procesamiento local por etapas (versión en desarrollo)
+
+En **Gestión → Descargar y procesar** se puede elegir:
+
+1. **Descargar y procesar**: descarga el rango completo, ejecuta el parser,
+   clasifica con Laya, genera embeddings y prepara los controles.
+2. **Solo descargar**: guarda fuentes, extrae el articulado y relaciones, y permite
+   revisar la fidelidad de la copia. No carga modelos.
+3. **Procesar un lote descargado**: trabaja con el contenido local de sus normas,
+   sin acceder a InfoLEG. Reutiliza resultados de ese lote por contenido/versión.
+
+Un solo trabajador procesa los trabajos en orden. Laya y E5 se ejecutan en
+subprocesos sucesivos para liberar la RAM entre etapas. Los resultados se guardan
+por fragmento y los embeddings por documento en una transacción. Ante una
+interrupción queda el trabajo fallido; un administrador puede volver a encolar
+el lote terminado. Si se interrumpió la descarga, hay que solicitar los IDs que
+faltan. No se reemplazan decisiones humanas al reintentar.
+
+**Modelos y datos:** Laya 0.4.13 y su revisión fijada; embeddings con
+[intfloat/multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small),
+revisión `614241f622f53c4eeff9890bdc4f31cfecc418b3`, 384 dimensiones.
+E5 usa prefijos `query:` y `passage:`, normalización y ventanas de 400 tokens
+con 50 de solapamiento. No se descarta silenciosamente el final de un artículo.
+Los pesos se descargan la primera vez desde Hugging Face y quedan en el volumen
+`juris_ai_models`; no se envían textos jurídicos ni consultas a una API de inferencia.
+
+La web carga E5 cuando llega la primera búsqueda por significado. Esto es trabajo
+adicional a la indexación de documentos: cada consulta distinta necesita su
+vector. Usa un proceso web con dos threads, serializa la inferencia y conserva
+hasta 128 consultas en memoria. La búsqueda por palabras sigue disponible sin
+cargar el modelo. La búsqueda semántica ofrece hasta 40 normas por similitud con
+el fragmento que motivó cada resultado; no garantiza relevancia jurídica o vigencia.
+Solo usa embeddings del contenido y modelo vigentes en el índice local. La versión
+preferida es la última actualizada disponible, o la última original si falta aquella.
+
+**Validación:** la copia de la norma, las relaciones jurídicas y las propuestas
+sobre materias/conceptos son casos separados. Las materias son multietiqueta y
+no representan el fuero competente. El catálogo inicial está en
+`tools/infoleg_index/topics.py`: materias propuestas por Laya y conceptos detectados
+por vocabulario. Todas las propuestas temáticas requieren revisión durante el
+piloto; las relaciones conservan la regla de 0,75 más desacuerdos y faltantes.
+Un rechazo registra la corrección sugerida en observaciones; no reescribe el texto
+ni entrena automáticamente el modelo. El buscador vectoriza el texto, no estas
+etiquetas. Las normas muestran etiquetas con acceso a la evidencia y estado humano.
+
+**Límites del piloto:** no hay resúmenes generativos, clasificación judicial de
+competencia, ajuste automático con votos, ni garantía de que el catálogo cubra
+cada tema. Si se vuelve a descargar una norma antes de procesar un lote antiguo,
+se procesa el contenido local más reciente; las copias de casos ya preparados
+se conservan. Los casos antiguos sin copia guardada lo indican al mostrar el texto
+local actual. La comparación semántica es exacta en PostgreSQL; evaluar HNSW cuando
+crezca el volumen. Calibrar las materias con ejemplos revisados antes de automatizar
+su aprobación: la muestra inicial tuvo omisiones y dudas.
+
+**Comprobación local:** 13 pruebas Django y 18 del crawler. En una prueba con
+los artículos 1 de InfoLEG 1 y 2, en CPU dentro de Docker, el proceso completo tardó
+84,69 s (incluyendo la primera descarga/carga de E5) y el máximo de los subprocesos
+fue 1.817,8 MiB. Una consulta semántica en frío tardó 10,57 s con 728 MiB de pico,
+y ordenó primero el artículo de expropiación para esa consulta. Es una prueba de
+funcionamiento, no una medición de precisión ni de rendimiento para 50 normas.
+
+Para compilar localmente desde la raíz:
+
+```bash
+docker compose -f tools/infoleg_index/compose.yaml build web init
+```
+
+`init` crea/actualiza las tablas, incluyendo `semantic_passages`. Al desplegar una
+futura publicación, recrear también `init`, `crawler` y `web`, manteniendo los dos
+volúmenes. El Compose de Dockhand conserva por ahora su etiqueta publicada anterior;
+seleccionar el nuevo SHA cuando se autorice su publicación. Esta versión no hace
+push ni publica imágenes automáticamente desde la máquina local.

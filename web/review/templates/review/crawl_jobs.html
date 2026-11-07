@@ -1,25 +1,27 @@
 {% extends "base.html" %}
-{% block title %}Descargar índices · JurisAI{% endblock %}
+{% block title %}Descargar y procesar · JurisAI{% endblock %}
 {% block content %}
 <a class="back" href="{% url 'review:management' %}">Volver a Gestión</a>
-<header class="work-heading"><div><h1>Descargar índices</h1><p>Elegí un rango de IDs de InfoLEG. La descarga continúa en segundo plano aunque cierres esta página.</p></div></header>
-<section class="panel crawl-request" aria-labelledby="new-download">
-  <h2 id="new-download">Nueva descarga</h2>
-  <p id="range-help">Los dos extremos están incluidos. Son IDs de InfoLEG, no números de ley. Máximo: 1.000 índices por lote.</p>
-  <form method="post" class="crawl-range" aria-describedby="range-help">
+<header class="work-heading"><div><h1>Descargar y procesar</h1><p>Primero guardamos las fuentes. Después clasificamos el contenido y preparamos la búsqueda y la revisión.</p></div></header>
+<section class="panel crawl-request" aria-labelledby="new-job">
+  <h2 id="new-job">Nueva solicitud</h2>
+  <form method="post" class="stack-form pipeline-form">
     {% csrf_token %}{{ form.submission_id }}{{ form.submission_id.errors }}{{ form.non_field_errors }}
-    <div><label for="{{ form.start_id.id_for_label }}">{{ form.start_id.label }}</label>{{ form.start_id }}{{ form.start_id.errors }}</div>
-    <div><label for="{{ form.end_id.id_for_label }}">{{ form.end_id.label }}</label>{{ form.end_id }}{{ form.end_id.errors }}</div>
-    <button class="button primary" type="submit">Encolar descarga</button>
+    <label for="{{ form.mode.id_for_label }}">{{ form.mode.label }}</label>{{ form.mode }}{{ form.mode.errors }}
+    <p class="muted">«Solo descargar» guarda la ficha, el texto y las relaciones del parser. «Procesar un lote descargado» agrega Laya y búsqueda semántica sin volver a descargar.</p>
+    <fieldset><legend>Para una descarga nueva</legend><p id="range-help">IDs de InfoLEG, no números de ley. Ambos extremos están incluidos; hasta 1.000 índices por lote.</p>
+      <div class="crawl-range"><div><label for="{{ form.start_id.id_for_label }}">{{ form.start_id.label }}</label>{{ form.start_id }}{{ form.start_id.errors }}</div><div><label for="{{ form.end_id.id_for_label }}">{{ form.end_id.label }}</label>{{ form.end_id }}{{ form.end_id.errors }}</div></div>
+    </fieldset>
+    <div><label for="{{ form.run.id_for_label }}">Para procesar una descarga existente</label>{{ form.run }}{{ form.run.errors }}<p class="muted">Elegí el lote solo si seleccionaste «Procesar un lote descargado». Los resultados ya calculados se reutilizan y las revisiones se conservan.</p></div>
+    <button class="button primary" type="submit">Encolar solicitud</button>
   </form>
-  {% if last_id %}<p class="muted">Mayor ID presente en el archivo: <strong>{{ last_id }}</strong>. Puede haber huecos anteriores o fichas incorporadas por referencias.</p>{% endif %}
-  <p class="metric-help">Se ejecutan la descarga y nuestro parser, y se crean controles de índice para los validadores. La clasificación de pasajes con Laya se ejecuta por separado. Repetir un rango crea un lote nuevo y conserva las revisiones anteriores.</p>
+  {% if last_id %}<p class="muted">Mayor ID presente: <strong>{{ last_id }}</strong>. Puede haber huecos anteriores.</p>{% endif %}
 </section>
-<section class="panel table-panel" aria-labelledby="downloads">
-<div class="section-title"><h2 id="downloads">Historial de solicitudes</h2><a href="{% url 'review:crawl_jobs' %}">Actualizar listado</a></div>
-<p class="muted">Los lotes se procesan de a uno, por orden de llegada. Si el trabajador está apagado, quedan en cola.</p>
-{% if page.object_list %}<div class="table-scroll" role="region" aria-label="Solicitudes de descarga" tabindex="0"><table class="law-table"><thead><tr><th>Rango InfoLEG</th><th>Estado</th><th>Procesados</th><th>Solicitado por</th><th>Fecha</th></tr></thead>
-<tbody>{% for job in page %}<tr><th><a href="{% url 'review:crawl_job' job.pk %}">{{ job.start_id }}–{{ job.end_id }}</a></th><td>{{ job.get_status_display }}</td><td>{{ job.crawl_run.processed_count|default:0 }} / {{ job.total }}</td><td>{{ job.requested_by }}</td><td>{{ job.created_at|date:"d/m/Y H:i" }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="crawl-empty">Todavía no hay solicitudes desde el panel. Los lotes anteriores siguen disponibles en Gestión.</p>{% endif %}
+<section class="panel table-panel" aria-labelledby="jobs">
+<div class="section-title"><h2 id="jobs">Historial de solicitudes</h2><a href="{% url 'review:crawl_jobs' %}">Actualizar listado</a></div>
+<p class="muted">Un trabajo a la vez, por orden de llegada. Podés cerrar esta página; si el trabajador está apagado, las solicitudes esperan en cola.</p>
+{% if page.object_list %}<div class="table-scroll" role="region" aria-label="Solicitudes" tabindex="0"><table class="law-table"><thead><tr><th>Rango InfoLEG</th><th>Tarea</th><th>Estado</th><th>Solicitado por</th><th>Fecha</th></tr></thead>
+<tbody>{% for job in page %}<tr><th><a href="{% url 'review:crawl_job' job.pk %}">{{ job.start_id }}–{{ job.end_id }}</a></th><td>{{ job.get_mode_display }}</td><td>{{ job.get_status_display }}<br><small>{{ job.get_stage_display }}</small></td><td>{{ job.requested_by }}</td><td>{{ job.created_at|date:"d/m/Y H:i" }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p>No hay solicitudes todavía. Podés descargar un rango o elegir uno de los lotes existentes.</p>{% endif %}
 {% if page.paginator.num_pages > 1 %}<nav class="pagination" aria-label="Páginas de solicitudes">{% if page.has_previous %}<a href="?page={{ page.previous_page_number }}">Anterior</a>{% endif %}<span>{{ page.number }} / {{ page.paginator.num_pages }}</span>{% if page.has_next %}<a href="?page={{ page.next_page_number }}">Siguiente</a>{% endif %}</nav>{% endif %}
 </section>
 {% endblock %}

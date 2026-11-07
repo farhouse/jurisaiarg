@@ -197,6 +197,9 @@ class CrawlItem(models.Model):
 
 
 class CrawlJob(models.Model):
+    MODES = [('full', 'Descargar y procesar'), ('download', 'Solo descargar'), ('process', 'Procesar un lote descargado')]
+    mode = models.TextField(default='download', choices=MODES)
+    progress = models.JSONField(default=dict)
     submission_id = models.UUIDField(unique=True)
     start_id = models.IntegerField()
     end_id = models.IntegerField()
@@ -207,8 +210,9 @@ class CrawlJob(models.Model):
     ])
     stage = models.TextField(default="queued", choices=[
         ("queued", "Esperando al trabajador"), ("download", "Descargando índices"),
-        ("parser", "Ejecutando el parser"), ("review", "Preparando controles de índice"),
-        ("finished", "Controles de índice disponibles"),
+        ("parser", "Extrayendo relaciones"), ("classify", "Clasificando materias y pasajes"),
+        ("embeddings", "Preparando búsqueda semántica"), ("review", "Preparando revisión"),
+        ("finished", "Etapas solicitadas terminadas"),
     ])
     crawl_run = models.ForeignKey(CrawlRun, models.DO_NOTHING, null=True)
     created_at = models.DateTimeField()
@@ -257,6 +261,7 @@ class ReviewTask(models.Model):
     @property
     def reasons_display(self):
         labels = {
+            'catalogo_experimental': 'Revisar materias y conceptos propuestos; el catálogo está en evaluación',
             "control_del_indice": "Comprobar la ficha y el articulado descargado",
             "probabilidad_baja": "Probabilidad menor a 0,75",
             "desacuerdo_parser_laya": "El parser y Laya no coinciden",

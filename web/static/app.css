@@ -166,3 +166,20 @@ tbody th { font-weight:650; }.table-empty { padding:30px 12px; color:var(--muted
 .validator-checkbox .field-help { grid-column:2; }
 .work-heading h1 { overflow-wrap:anywhere; }
 @media(max-width:600px) { .validator-filters { grid-template-columns:minmax(0,1fr); }.validator-form { padding:18px; } }
+
+/* Extensión del flujo existente: tareas explícitas y evidencia legible. */
+.pipeline-form { max-width: 48rem; }
+.pipeline-form fieldset { min-width: 0; border: 1px solid var(--line, #d9dedb); padding: 1rem; }
+.pipeline-form select { width: 100%; max-width: 100%; }
+.pipeline-form .crawl-range { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.article-review { padding: .8rem 0; border-bottom: 1px solid var(--line, #d9dedb); }
+.article-review summary, .norm-card summary { cursor: pointer; font-weight: 600; }
+.topic-tags { display: flex; flex-wrap: wrap; gap: .5rem; padding: 0; list-style: none; }
+.topic-tags li { padding: .35rem .65rem; background: #edf2ee; color: #244d3f; border-radius: 6px; }
+.task-instructions li { margin-bottom: .6rem; }
+.search-mode { display: grid; gap: .3rem; flex: 0 0 15rem; }
+.law-search { align-items: end; }
+.source-text, .norm-card details { overflow-wrap: anywhere; }
+@media (max-width: 600px) { .pipeline-form .crawl-range { grid-template-columns: 1fr; } .law-search { flex-wrap: wrap; } .search-mode { width: 100%; flex-basis: auto; } }
+
+@media (max-width: 850px) { .search-mode { width: 100%; flex-basis: auto; } }
