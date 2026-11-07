@@ -42,7 +42,7 @@ def save_task(con, run_id, norm_id, kind, text, result, article_id=None, change_
     con.commit()
 
 
-def main(argv=None, router=None):
+def main(argv=None, router=None, report=None, ensure_model=None):
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("--dsn", required=True)
     cli.add_argument("--run-id", required=True, type=int)
@@ -58,6 +58,8 @@ def main(argv=None, router=None):
         items = con.execute("""SELECT n.id,n.infoleg_id,n.canonical_title,n.subject,n.article_count,ci.status
             FROM crawl_items ci JOIN norms n ON n.id=ci.norm_id WHERE ci.crawl_run_id=%s ORDER BY ci.infoleg_id""", (args.run_id,)).fetchall()
         for norm_id, infoleg_id, title, subject, article_count, status in items:
+            if report:
+                report('Preparando controles para revisión', document=f'InfoLEG {infoleg_id}')
             identity = con.execute('SELECT norm_type,number,issuing_body,summary FROM norms WHERE id=%s', (norm_id,)).fetchone()
             articles = con.execute('''SELECT a.article_label,nv.version_type,av.text_normalized
                 FROM article_versions av JOIN articles a ON a.id=av.article_id
@@ -86,7 +88,9 @@ def main(argv=None, router=None):
               ORDER BY n.infoleg_id,a.ordinal,av.id""", (args.run_id,)).fetchall()
         con.commit()
         for av_id, norm_id, infoleg_id, article_key, text in rows:
-            for fragment, divided in passages(text):
+            for fragment_number, (fragment, divided) in enumerate(passages(text), 1):
+                if report:
+                    report('Contrastando relaciones con Laya', document=f'InfoLEG {infoleg_id} · artículo {article_key}', fragment=fragment_number)
                 key = hashlib.sha256(f"{args.run_id}|{av_id}|{MODEL_REVISION}|{TRIAGE_VERSION}|0.75|{fragment}".encode()).hexdigest()
                 # Reintentar errores antiguos sin tocar decisiones humanas.
                 con.execute("DELETE FROM review_tasks WHERE fingerprint=%s AND model_result ? 'error' AND revision=0 AND NOT EXISTS (SELECT 1 FROM review_events WHERE task_id=review_tasks.id)", (key,))
@@ -104,6 +108,10 @@ def main(argv=None, router=None):
                     if change:
                         change_id, resolved = change[0], bool(change[1])
                 con.commit()
+                if ensure_model:
+                    ensure_model()
+                if report:
+                    report('Contrastando relaciones con Laya', document=f'InfoLEG {infoleg_id} · artículo {article_key}', fragment=fragment_number)
                 result = classify(router, {"text": fragment, "infoleg_id": infoleg_id})
                 if candidates and not resolved:
                     result["review_reasons"].append("norma_sin_resolver")

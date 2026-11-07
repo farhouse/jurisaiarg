@@ -12,6 +12,7 @@ from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 import os
 
+from job_activity import JobActivity
 from crawl_infoleg_pg import crawl_ids
 from extract_legal_changes import main as parse_changes
 from prepare_review import main as prepare_review
@@ -68,34 +69,38 @@ def process_next(con, dsn):
     run_id = job['crawl_run_id'] if job['mode'] == 'process' else con.execute("""INSERT INTO crawl_runs(source_id,requested_ids)
         SELECT id,%s FROM sources WHERE code='infoleg' RETURNING id""", (ids,)).fetchone()[0]
     con.execute("""UPDATE crawl_jobs SET status='running',
-        started_at=now(), crawl_run_id=%s WHERE id=%s""", (run_id, job['id']))
+        started_at=now(), heartbeat_at=now(), last_activity_at=now(), progress='{}', finished_at=NULL, error='', crawl_run_id=%s WHERE id=%s""", (run_id, job['id']))
     con.commit()
     try:
-        if job['mode'] != 'process':
-            con.execute("UPDATE crawl_jobs SET stage='download' WHERE id=%s", (job['id'],))
-            con.commit()
-            crawl_ids(con, run_id, ids)
-        else:
-            row = con.execute("SELECT requested_ids FROM crawl_runs WHERE id=%s AND finished_at IS NOT NULL AND status IN ('ok','partial')", (run_id,)).fetchone()
-            if not row:
-                raise ValueError('El lote debe haber terminado la descarga')
-            ids = row[0]
-        con.execute("UPDATE crawl_jobs SET stage='parser' WHERE id=%s", (job['id'],))
-        con.commit()
-        parse_changes(['--dsn', dsn, '--infoleg-ids', *map(str, ids)])
-        if job['mode'] != 'download':
-            # Cada proceso termina antes de cargar el siguiente modelo y libera su RAM.
-            for stage in ('classify', 'embeddings'):
-                con.execute("UPDATE crawl_jobs SET stage=%s WHERE id=%s", (stage, job['id']))
+        with JobActivity(dsn, job['id'], heartbeat=True) as report:
+            if job['mode'] != 'process':
+                con.execute("UPDATE crawl_jobs SET stage='download' WHERE id=%s", (job['id'],))
                 con.commit()
-                run_stage(stage, job['id'], run_id, dsn)
-        con.execute("UPDATE crawl_jobs SET stage='review' WHERE id=%s", (job['id'],))
-        con.commit()
-        prepare_review(['--dsn', dsn, '--run-id', str(run_id), '--indices-only'])
-        status = con.execute("SELECT status FROM crawl_runs WHERE id=%s", (run_id,)).fetchone()[0]
-        con.execute("UPDATE crawl_jobs SET status=%s, stage='finished', finished_at=now() WHERE id=%s",
-                    ('done' if status == 'ok' else 'partial', job['id']))
-        con.commit()
+                crawl_ids(con, run_id, ids, report=report)
+            else:
+                row = con.execute("SELECT requested_ids FROM crawl_runs WHERE id=%s AND finished_at IS NOT NULL AND status IN ('ok','partial')", (run_id,)).fetchone()
+                if not row:
+                    raise ValueError('El lote debe haber terminado la descarga')
+                ids = row[0]
+            con.execute("UPDATE crawl_jobs SET stage='parser' WHERE id=%s", (job['id'],))
+            con.commit()
+            report('Extrayendo relaciones con el parser')
+            parse_changes(['--dsn', dsn, '--infoleg-ids', *map(str, ids)], report=report)
+            if job['mode'] != 'download':
+                # Cada proceso termina antes de cargar el siguiente modelo y libera su RAM.
+                for stage in ('classify', 'embeddings'):
+                    con.execute("UPDATE crawl_jobs SET stage=%s WHERE id=%s", (stage, job['id']))
+                    con.commit()
+                    report('Iniciando clasificación' if stage == 'classify' else 'Iniciando búsqueda semántica')
+                    run_stage(stage, job['id'], run_id, dsn)
+            con.execute("UPDATE crawl_jobs SET stage='review' WHERE id=%s", (job['id'],))
+            con.commit()
+            report('Preparando controles para revisión')
+            prepare_review(['--dsn', dsn, '--run-id', str(run_id), '--indices-only'], report=report)
+            status = con.execute("SELECT status FROM crawl_runs WHERE id=%s", (run_id,)).fetchone()[0]
+            con.execute("UPDATE crawl_jobs SET status=%s, stage='finished', finished_at=now() WHERE id=%s",
+                        ('done' if status == 'ok' else 'partial', job['id']))
+            con.commit()
     except BaseException as exc:
         con.rollback()
         # No guardar DSN, HTML remoto ni trazas que puedan incluir credenciales.

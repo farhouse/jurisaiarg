@@ -19,3 +19,6 @@ CREATE INDEX IF NOT EXISTS idx_crawl_jobs_queue ON crawl_jobs(id) WHERE status='
 ALTER TABLE crawl_jobs ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'download'
   CHECK (mode IN ('download','full','process'));
 ALTER TABLE crawl_jobs ADD COLUMN IF NOT EXISTS progress JSONB NOT NULL DEFAULT '{}';
+
+ALTER TABLE crawl_jobs ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ;
+ALTER TABLE crawl_jobs ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ;

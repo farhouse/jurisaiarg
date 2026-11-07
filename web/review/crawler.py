@@ -66,11 +66,28 @@ def jobs(request):
     }, status=400 if request.method == "POST" else 200)
 
 
+def duration(seconds):
+    seconds = max(0, int(seconds))
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    return f'{hours} h {minutes} min' if hours else (f'{minutes} min {seconds} s' if minutes else f'{seconds} s')
+
+
 @staff_required
 @require_GET
 def job_detail(request, pk):
     job = get_object_or_404(CrawlJob.objects.select_related("crawl_run"), pk=pk)
     errors = job.crawl_run.items.filter(status__in=["error_descarga", "error_parseo"]) if job.crawl_run else []
+    now = timezone.now()
+    end = job.finished_at or now
+    heartbeat_age = (now - job.heartbeat_at).total_seconds() if job.heartbeat_at else None
+    activity_age = (end - job.last_activity_at).total_seconds() if job.last_activity_at else None
     return render(request, "review/crawl_job.html", {
         "job": job, "errors": errors, "processed": job.crawl_run.processed_count if job.crawl_run else 0,
+        "elapsed": duration((end - job.started_at).total_seconds()) if job.started_at else None,
+        "heartbeat_age": duration(heartbeat_age) if heartbeat_age is not None else None,
+        "activity_age": duration(activity_age) if activity_age is not None else None,
+        "signal_stale": heartbeat_age is not None and heartbeat_age >= 60,
+        "progress_stale": activity_age is not None and activity_age >= 300,
+
     })

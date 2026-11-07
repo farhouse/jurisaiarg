@@ -25,7 +25,7 @@ def load_norm_index(cur) -> dict[tuple[str, str], list[int]]:
     return index
 
 
-def main(argv=None):
+def main(argv=None, report=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--dsn", required=True)
     parser.add_argument("--infoleg-ids", type=int, nargs="*")
@@ -60,6 +60,8 @@ def main(argv=None):
         resolved = 0
         try:
             for article_version_id, article_id, article_key, affected_norm_id, infoleg_id, text in rows:
+                if report:
+                    report('Extrayendo relaciones con el parser', document=f'InfoLEG {infoleg_id} · artículo {article_key}')
                 for candidate in extract_legal_changes(text):
                     matches = norm_index.get((
                         normalize_norm_type(candidate.amending_norm_type),

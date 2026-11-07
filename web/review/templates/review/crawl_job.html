@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Descarga {{ job.start_id }}–{{ job.end_id }} · JurisAI{% endblock %}
+{% block title %}Trabajo {{ job.start_id }}–{{ job.end_id }} · JurisAI{% endblock %}
 {% block extra_head %}{% if job.active %}<meta http-equiv="refresh" content="10">{% endif %}{% endblock %}
 {% block content %}
 <a class="back" href="{% url 'review:crawl_jobs' %}">Volver a solicitudes</a>
@@ -7,8 +7,27 @@
 <section class="panel">
   <h2>{{ job.get_status_display }}</h2><p>{{ job.get_mode_display }}</p>
   <p>{% if job.status == 'failed' %}Última etapa: {% endif %}{{ job.get_stage_display }}.</p>
-  <p><strong>{{ processed }} de {{ job.total }}</strong> índices procesados. Este contador incluye los intentos con error.</p>
-  <progress class="crawl-progress" value="{{ processed }}" max="{{ job.total }}" aria-label="Índices procesados">{{ processed }} / {{ job.total }}</progress>
+  {% if elapsed %}<p>Tiempo transcurrido: <strong>{{ elapsed }}</strong>.</p>{% endif %}
+  {% if job.status == 'running' %}
+    <h3>{{ job.progress.activity.message|default:job.get_stage_display }}</h3>
+    {% if job.progress.activity.document %}<p>Documento en curso: <strong>{{ job.progress.activity.document }}</strong>{% if job.progress.activity.fragment %} · Fragmento {{ job.progress.activity.fragment }}{% if job.progress.activity.fragments_total %} de {{ job.progress.activity.fragments_total }}{% endif %}{% endif %}.</p>{% endif %}
+    {% if job.progress.activity.file %}
+      <p>Archivo en descarga: <code>{{ job.progress.activity.file }}</code><br>{{ job.progress.activity.files_done }} de {{ job.progress.activity.files_total }} archivos pendientes completados.</p>
+      <p class="muted">El contador cambia al completar cada archivo. Un archivo grande puede tardar varios minutos; no hay un porcentaje de bytes disponible.</p>
+    {% endif %}
+    {% if job.progress.activity.cached %}<p>Archivos disponibles en caché; no hizo falta descargarlos.</p>{% endif %}
+    {% if job.heartbeat_at %}
+      <p>Última señal del trabajador: hace {{ heartbeat_age }}.<br>Última actividad registrada: {% if job.last_activity_at %}hace {{ activity_age }} ({{ job.last_activity_at|date:"H:i:s" }}).{% else %}sin datos.{% endif %}</p>
+      {% if signal_stale %}<p class="message" role="status">No recibimos señal del trabajador desde hace {{ heartbeat_age }}. Comprobá el contenedor crawler y su conexión a la base de datos. El trabajo aún no se marcó como fallido.</p>
+      {% elif progress_stale %}<p class="message" role="status">Sin avances registrados desde hace {{ activity_age }}. El trabajador sigue conectado, pero la operación puede estar tardando o haberse bloqueado. Revisá sus logs si la espera continúa.</p>
+      {% else %}<p class="muted">El trabajador sigue conectado. Esta señal no garantiza que la descarga o el modelo estén avanzando.</p>{% endif %}
+    {% else %}<p class="muted">Este trabajo todavía no tiene señales de actividad. Comprobá que el trabajador esté actualizado y encendido.</p>{% endif %}
+  {% elif job.status == 'failed' and job.progress.activity.message %}
+    <p>Última operación: {{ job.progress.activity.message }}{% if job.progress.activity.document %} · {{ job.progress.activity.document }}{% endif %}.</p>
+  {% endif %}
+  <h3>Avance del lote</h3>
+  <p><strong>{{ processed }} de {{ job.total }}</strong> índices descargados o intentados. Este contador incluye los errores y no mide la clasificación.</p>
+  <progress class="crawl-progress" value="{{ processed }}" max="{{ job.total }}" aria-label="Descarga de índices">{{ processed }} / {{ job.total }}</progress>
   {% if job.progress.classify %}<p>Clasificación temática: {{ job.progress.classify.done }} / {{ job.progress.classify.total }} textos. Después se contrastan las relaciones con el parser.</p>{% endif %}
   {% if job.progress.embeddings %}<p>Búsqueda semántica: {{ job.progress.embeddings.done }} / {{ job.progress.embeddings.total }} textos.</p>{% endif %}
   {% if job.active %}<p class="muted">Esta página se actualiza cada 10 segundos. Podés cerrarla y volver desde el historial.{% if job.status == 'queued' %} Si no avanza, comprobá que el trabajador esté encendido.{% endif %}</p>{% endif %}

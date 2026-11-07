@@ -200,6 +200,8 @@ class CrawlJob(models.Model):
     MODES = [('full', 'Descargar y procesar'), ('download', 'Solo descargar'), ('process', 'Procesar un lote descargado')]
     mode = models.TextField(default='download', choices=MODES)
     progress = models.JSONField(default=dict)
+    heartbeat_at = models.DateTimeField(null=True)
+    last_activity_at = models.DateTimeField(null=True)
     submission_id = models.UUIDField(unique=True)
     start_id = models.IntegerField()
     end_id = models.IntegerField()

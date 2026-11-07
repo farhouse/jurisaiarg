@@ -64,3 +64,39 @@ class CrawlerAdminTest(TransactionTestCase):
         self.client.force_login(validator)
         self.assertEqual(self.client.get(response.url).status_code, 403)
         self.assertEqual(self.client.post(response.url).status_code, 403)
+
+    def test_status_distinguishes_progress_signal_and_terminal_states(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        admin = User.objects.create_user('activity-admin', is_staff=True)
+        self.client.force_login(admin)
+        now = timezone.now()
+        job = CrawlJob.objects.create(submission_id=uuid.uuid4(), start_id=301, end_id=350,
+            requested_by=admin.username, created_at=now, started_at=now-timedelta(minutes=12),
+            status='running', stage='classify', heartbeat_at=now,
+            last_activity_at=now-timedelta(minutes=6),
+            progress={'activity': {'message': 'Descargando Laya', 'file': '<script>model</script>',
+                                   'files_done': 2, 'files_total': 5}})
+        url = f'/gestion/descargas/{job.pk}/'
+        try:
+            response = self.client.get(url)
+            self.assertContains(response, 'Descargando Laya')
+            self.assertContains(response, 'Sin avances registrados')
+            self.assertContains(response, '&lt;script&gt;model&lt;/script&gt;')
+            self.assertContains(response, '2 de 5')
+            self.assertNotContains(response, 'No recibimos señal')
+            job.heartbeat_at = now-timedelta(minutes=2)
+            job.save()
+            self.assertContains(self.client.get(url), 'No recibimos señal')
+            for state in ('done', 'failed', 'queued'):
+                job.status = state
+                job.save()
+                response = self.client.get(url)
+                self.assertNotContains(response, 'Sin avances registrados')
+                self.assertNotContains(response, 'No recibimos señal')
+            job.status = 'running'
+            job.heartbeat_at = job.last_activity_at = None
+            job.save()
+            self.assertContains(self.client.get(url), 'todavía no tiene señales')
+        finally:
+            job.delete()

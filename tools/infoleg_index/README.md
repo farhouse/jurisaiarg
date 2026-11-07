@@ -316,5 +316,35 @@ Pruebas de integración: crear una base descartable cuyo nombre empiece por `tes
 configurar `CRAWLER_TEST_DSN` con su DSN y ejecutar `python -m unittest discover -p 'test_*.py'`.
 No usar la base del archivo jurídico. `test_worker.py` y `test_enrich.py` prueban
 reintentos, conservación de votos, idempotencia, actualización de contenido y
-escritura atómica; simulan red e inferencia. La prueba real con modelos del README
+escritura atómica; simulan red e inferencia. `test_job_activity.py` comprueba caché
+parcial, errores de descarga y que la señal de conexión no se confunda con progreso.
+La prueba real con modelos del README
 se ejecutó aparte sobre dos artículos copiados a otra base temporal.
+
+### Seguimiento de actividad desde Gestión
+
+El detalle de cada solicitud se actualiza cada 10 segundos y muestra la operación,
+modelo, archivo o documento/fragmento en curso, tiempo transcurrido y última actividad.
+La preparación distingue comprobación de caché, descarga de archivos faltantes y
+carga en memoria. El contador de descarga es por archivos completos, no por bytes;
+puede permanecer quieto mientras se descarga un archivo grande. Los manifiestos de
+archivos en `enrich.py` corresponden a las revisiones fijadas de Laya y E5: actualizarlos
+junto con las revisiones si se cambia de modelo.
+
+El supervisor registra una señal de conexión cada 10 segundos mediante una conexión
+independiente. Esa señal no actualiza la fecha del último avance del modelo. La web
+avisa tras 60 segundos sin señal o 5 minutos sin actividad registrada, sin declarar
+el trabajo fallido ni cancelarlo. Una señal reciente prueba comunicación con la base,
+no que una inferencia o descarga bloqueada esté avanzando. Los trabajos terminados
+no muestran alertas de inactividad; los históricos sin telemetría lo indican.
+
+El servicio `init` agrega las columnas `heartbeat_at` y `last_activity_at` de forma
+idempotente al actualizar las imágenes. Deben actualizarse web, crawler e init juntos.
+La caché persistente evita volver a descargar los archivos ya disponibles y la
+reanudación sigue reutilizando resultados guardados por contenido y modelo.
+
+Verificación del seguimiento: 14 pruebas web y 21 del crawler; además, una ejecución
+real con un texto ilustrativo en una base descartable registró descarga, carga e
+inferencia de ambos modelos y terminó con un embedding guardado (140,6 s incluyendo
+la descarga inicial en esa caché). Es una comprobación funcional, no una estimación
+de rendimiento del servidor de producción.

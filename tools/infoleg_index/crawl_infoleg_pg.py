@@ -303,10 +303,12 @@ def main():
         crawl_ids(con, run_id, args.ids, args.timeout, args.sleep, args.jitter)
 
 
-def crawl_ids(con, run_id, ids, timeout=30, delay=0.5, jitter=0.2):
+def crawl_ids(con, run_id, ids, timeout=30, delay=0.5, jitter=0.2, report=None):
     processed = 0
     failures = 0
     for infoleg_id in ids:
+        if report:
+            report('Descargando desde InfoLEG', document=f'InfoLEG {infoleg_id}')
         with con.cursor() as cur:
             cur.execute(
                 """INSERT INTO crawl_items(crawl_run_id, infoleg_id, status)
