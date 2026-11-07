@@ -58,7 +58,7 @@ pegar el YAML y configurar estas variables en el panel del stack:
 | `JURISAI_PORT` | Opcional: puerto HTTP, por defecto `8000`. |
 
 Para generar cada secreto por separado se puede usar `openssl rand -hex 32`.
-El archivo fija la versión publicada `0af1d44`; `JURISAI_IMAGE_TAG` permite
+El archivo fija la versión publicada `3a914bc`; `JURISAI_IMAGE_TAG` permite
 seleccionar otro SHA publicado o `latest`. Las imágenes son Linux/amd64.
 No hay que clonar código, compilar, montar carpetas ni configurar acceso a GHCR.
 El servicio `init` termina con código 0 al preparar el esquema: es normal.
