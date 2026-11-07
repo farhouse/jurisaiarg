@@ -27,17 +27,19 @@ services:
       start_period: 10s
 
   init:
-    image: ghcr.io/farhouse/jurisaiarg-crawler:${JURISAI_IMAGE_TAG:-23b725094f352be60e79d0829d7ba45d9f43ad96}
+    image: ghcr.io/farhouse/jurisaiarg-crawler:${JURISAI_IMAGE_TAG:-0af1d4431f38c0d94568ec8cfe9fdc5b6fb9aed6}
     platform: linux/amd64
     restart: "no"
     command: ["python", "worker.py", "--init"]
+    healthcheck:
+      disable: true
     environment: *database-environment
     depends_on:
       db:
         condition: service_healthy
 
   web:
-    image: ghcr.io/farhouse/jurisaiarg-web:${JURISAI_IMAGE_TAG:-23b725094f352be60e79d0829d7ba45d9f43ad96}
+    image: ghcr.io/farhouse/jurisaiarg-web:${JURISAI_IMAGE_TAG:-0af1d4431f38c0d94568ec8cfe9fdc5b6fb9aed6}
     platform: linux/amd64
     restart: unless-stopped
     environment:
@@ -52,15 +54,9 @@ services:
         condition: service_healthy
       init:
         condition: service_completed_successfully
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/accounts/login/', timeout=5).close()"]
-      interval: 15s
-      timeout: 6s
-      retries: 5
-      start_period: 30s
 
   crawler:
-    image: ghcr.io/farhouse/jurisaiarg-crawler:${JURISAI_IMAGE_TAG:-23b725094f352be60e79d0829d7ba45d9f43ad96}
+    image: ghcr.io/farhouse/jurisaiarg-crawler:${JURISAI_IMAGE_TAG:-0af1d4431f38c0d94568ec8cfe9fdc5b6fb9aed6}
     platform: linux/amd64
     restart: unless-stopped
     init: true
