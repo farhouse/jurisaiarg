@@ -253,6 +253,7 @@ class ReviewTask(models.Model):
     fingerprint = models.TextField(unique=True)
     review_status = models.TextField(default="pendiente", choices=[("pendiente", "Pendiente"), ("validada", "Correcto"), ("rechazada", "Incorrecto")])
     review_notes = models.TextField(default="")
+    proposed_correction = models.JSONField(default=dict)
     reviewed_by = models.TextField(null=True)
     reviewed_at = models.DateTimeField(null=True)
     revision = models.IntegerField(default=0)

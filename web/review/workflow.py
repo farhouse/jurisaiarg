@@ -14,8 +14,9 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_safe
 
+from .forms import DecisionForm
 from .models import CrawlJob, CrawlRun, LegalChange, NormReview, ReviewEvent, ReviewTask
-from . import copy_review
+from . import copy_review, passage_review
 
 
 def validator_required(view):
@@ -36,18 +37,6 @@ def selected_run(request):
         return get_object_or_404(CrawlRun, pk=int(value))
     # Una descarga nueva no debe ocultar el lote que los validadores están revisando.
     return CrawlRun.objects.filter(pk__in=ReviewTask.objects.values("crawl_run_id")).first() or CrawlRun.objects.first()
-
-
-class DecisionForm(forms.Form):
-    status = forms.ChoiceField(choices=[("validada", "Correcto"), ("rechazada", "Incorrecto"), ("pendiente", "Dejar pendiente")], widget=forms.RadioSelect)
-    notes = forms.CharField(required=False, max_length=5000, label="Observaciones", widget=forms.Textarea(attrs={"rows": 4}))
-    revision = forms.IntegerField(min_value=0, widget=forms.HiddenInput)
-
-    def clean(self):
-        data = super().clean()
-        if data.get("status") == "rechazada" and not data.get("notes", "").strip() and not data.get('issues'):
-            self.add_error("notes", "Indicá qué está mal y qué habría que corregir.")
-        return data
 
 
 class CopyDecisionForm(DecisionForm):
@@ -192,7 +181,7 @@ def task_detail(request, pk):
             raise Http404
         return render(request, 'review/task.html', context)
     task = get_object_or_404(ReviewTask.objects.select_related('norm', 'article_version__norm_version',
-                              'legal_change__amending_norm'), pk=current['id'])
+                              'article_version__article', 'legal_change__amending_norm', 'legal_change__affected_norm', 'legal_change__affected_article'), pk=current['id'])
     position = cases.index(current)
     context.update(case_position=position + 1, previous_case=cases[position - 1] if position else None,
                    next_case=cases[position + 1] if position + 1 < len(cases) else None,
@@ -205,17 +194,23 @@ def task_detail(request, pk):
         task.reviewed_at = own_vote.updated_at if own_vote else None
     initial = {"status": task.review_status if task.review_status != "pendiente" else None, "notes": task.review_notes, "revision": (own_vote.revision if own_vote else 0) if task.kind == "indice" else task.revision}
     copy = copy_review.copy_context(task, own_vote, request, current['url']) if task.kind == 'indice' else None
+    passage = passage_review.passage_context(task, request, current['url']) if task.kind == 'pasaje' else None
     control = copy['control'] if copy else None
     guided_post = request.method == 'POST' and 'check' in request.POST
+    proposal_post = request.method == 'POST' and 'proposal_kind' in request.POST
     if copy and control and (request.method != 'POST' or guided_post):
         form = CopyDecisionForm(request.POST if guided_post else None, control=control, initial={
             **initial, 'check': control['key'], 'status': control['status'] if control['saved'] else None,
             'notes': control['notes'], 'issues': control['issues']})
+    elif passage and (request.method != 'POST' or proposal_post):
+        form = passage_review.proposal_form(task, request.POST if proposal_post else None, initial)
     else:
         form = DecisionForm(request.POST if request.method == 'POST' else None, initial=initial)
     code = 200
     if request.method == "POST":
         if guided_post and (not copy or not control):
+            raise Http404
+        if proposal_post and not passage:
             raise Http404
         if form.is_valid():
             with transaction.atomic():
@@ -233,6 +228,16 @@ def task_detail(request, pk):
                     checks = dict(vote.checks) if vote else {}
                     details = {}
                     event_notes = notes
+                    if proposal_post:
+                        proposed = {**form.correction, 'issues': form.cleaned_data['issues']}
+                        details = {'proposal_kind': form.proposal_kind, 'original': form.original,
+                                   'proposed': proposed, 'changes': form.changes,
+                                   'sources': [{'id': v['source'].pk, 'norm_id': v['source'].norm_id,
+                                                'run_id': v['source'].crawl_run_id, 'retrieved_at': v['source'].retrieved_at.isoformat()}
+                                               for v in passage['viewers']]}
+                        event_notes = notes or '; '.join(form.changes) or ', '.join(dict(form.fields['issues'].choices)[issue] for issue in form.cleaned_data['issues'])
+                        if not notes:
+                            notes = event_notes
                     if guided_post:
                         issues = form.cleaned_data['issues']
                         if not notes and issues:
@@ -253,11 +258,13 @@ def task_detail(request, pk):
                     if locked.kind == "indice":
                         NormReview.objects.update_or_create(task=locked, user_id=request.user.pk, defaults={"username": request.user.get_username(), "status": status, "notes": notes, 'checks': checks, "revision": revision + 1, "updated_at": now})
                     else:
+                        if proposal_post:
+                            locked.proposed_correction = proposed
                         locked.review_status, locked.review_notes = status, notes
                         locked.reviewed_by = request.user.get_username() if status != "pendiente" else None
                         locked.reviewed_at = now if status != "pendiente" else None
                         locked.revision += 1
-                        locked.save(update_fields=["review_status", "review_notes", "reviewed_by", "reviewed_at", "revision"])
+                        locked.save(update_fields=["review_status", "review_notes", "reviewed_by", "reviewed_at", "revision", 'proposed_correction'])
                         if locked.legal_change_id:
                             LegalChange.objects.filter(pk=locked.legal_change_id).update(review_status=status, review_notes=notes, reviewed_by=locked.reviewed_by, reviewed_at=locked.reviewed_at, updated_at=now)
             if code != 409:
@@ -277,14 +284,14 @@ def task_detail(request, pk):
             code = 400
     articles = copy_review.articles_for(task) if task.kind == 'indice' else []
     context.update(task=task, form=form, articles=articles,
-                   copy=copy, snapshot='articles' in task.model_result, history=task.events.order_by('-id')[:10])
+                   copy=copy, passage=passage, snapshot='articles' in task.model_result, history=task.events.order_by('-id')[:10])
     return render(request, 'review/task.html', context, status=code)
 
 
 @validator_required
 @require_safe
 def copy_source(request, pk, source_id):
-    task = get_object_or_404(ReviewTask, pk=pk, kind='indice')
+    task = get_object_or_404(ReviewTask.objects.select_related('legal_change'), pk=pk)
     return copy_review.source_response(task, source_id, request.GET.get('focus', ''))
 
 

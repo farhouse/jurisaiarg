@@ -32,3 +32,18 @@ class ReviewForm(forms.ModelForm):
             "review_status": forms.RadioSelect,
             "review_notes": forms.Textarea(attrs={"rows": 4, "placeholder": "Aclaración opcional o motivo por el que la relación es incorrecta…"}),
         }
+
+
+class DecisionForm(forms.Form):
+    status = forms.ChoiceField(choices=[("validada", "Correcto"), ("rechazada", "Incorrecto"), ("pendiente", "Dejar pendiente")], widget=forms.RadioSelect)
+    notes = forms.CharField(required=False, max_length=5000, label="Observaciones", widget=forms.Textarea(attrs={"rows": 4}))
+    revision = forms.IntegerField(min_value=0, widget=forms.HiddenInput)
+
+    def has_correction(self, data):
+        return False
+
+    def clean(self):
+        data = super().clean()
+        if data.get("status") == "rechazada" and not data.get("notes", "").strip() and not data.get('issues') and not self.has_correction(data):
+            self.add_error("notes", "Indicá qué está mal y qué habría que corregir.")
+        return data

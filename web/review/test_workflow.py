@@ -195,7 +195,7 @@ class WorkflowTest(TransactionTestCase):
         task = ReviewTask.objects.create(crawl_run=run, norm=norm, kind='pasaje', source_text='<script>evidencia</script>', decision='revision', fingerprint='topic-review', created_at=now,
             model_result={'category':'temas','matters':[{'label':'Laboral','score':.9}], 'concepts':['Salario']})
         page = self.client.get(f'/validar/{task.pk}/')
-        self.assertContains(page, 'Tu tarea: revisar materias y conceptos')
+        self.assertContains(page, 'Revisar materias y conceptos.')
         self.assertContains(page, 'Laboral')
         self.assertContains(page, '&lt;script&gt;')
         self.assertNotContains(page, '<script>evidencia')
@@ -369,3 +369,107 @@ class WorkflowTest(TransactionTestCase):
         self.assertEqual(self.client.get(source_url).status_code, 404)
         for query in ('?step=unknown', '?step=articles&article=-1', '?step=articles&article=garbage', '?version=invalid'):
             self.assertEqual(self.client.get(url + query).status_code, 404)
+
+    def test_zzzz_topics_proposals_are_separate_and_conflict_safe(self):
+        first = User.objects.create_user('proposal-first', is_staff=True)
+        second = User.objects.create_user('proposal-second', is_staff=True)
+        now = timezone.now()
+        run = CrawlRun.objects.create(requested_ids=[99101], started_at=now, status='ok', processed_count=1)
+        norm = Norm.objects.create(infoleg_id=99101, norm_type='Ley', number='23600', general_status='desconocida', index_status='solo_ficha', article_count=0)
+        original = {'category': 'temas', 'matters': [{'label': 'Administrativo', 'score': .9}, {'label': 'Laboral', 'score': .8}], 'concepts': ['Expropiación', 'Inmueble']}
+        task = ReviewTask.objects.create(crawl_run=run, norm=norm, kind='pasaje', source_text='Expropiación de inmueble con indemnización.', model_result=original, decision='revision', fingerprint='proposal-topics', created_at=now)
+        url = f'/validar/{task.pk}/'
+        self.client.force_login(first)
+        page = self.client.get(url)
+        self.assertContains(page, 'Revisar materias y conceptos.')
+        self.assertEqual(page.context['form'].initial['keep_matters'], ['Administrativo', 'Laboral'])
+        payload = {'proposal_kind': 'topics', 'revision': 0, 'status': 'rechazada', 'keep_matters': ['Administrativo'], 'keep_concepts': ['Expropiación', 'Inmueble'], 'add_concepts': 'Indemnización, indemnización', 'add_matters': '', 'issues': ['irrelevant']}
+        protected = Client(enforce_csrf_checks=True)
+        protected.force_login(first)
+        self.assertEqual(protected.post(url, payload).status_code, 403)
+        self.assertEqual(self.client.post(url, {**payload, 'status': 'validada'}).status_code, 400)
+        self.assertEqual(self.client.post(url, {**payload, 'proposal_kind': 'relations'}).status_code, 400)
+        self.assertEqual(self.client.post(url, {**payload, 'keep_matters': ['Inventada']}).status_code, 400)
+        self.assertEqual(self.client.post(url, {**payload, 'add_concepts': 'x' * 81}).status_code, 400)
+        self.assertEqual(self.client.post(url, payload).status_code, 302)
+        task.refresh_from_db()
+        self.assertEqual(task.model_result, original)
+        self.assertEqual(task.proposed_correction['matters'], ['Administrativo'])
+        self.assertEqual(task.proposed_correction['concepts'], ['Expropiación', 'Inmueble', 'Indemnización'])
+        self.assertEqual(task.review_status, 'rechazada')
+        self.assertEqual(task.revision, 1)
+        event = ReviewEvent.objects.get(task=task)
+        self.assertEqual(event.details['original']['matters'], ['Administrativo', 'Laboral'])
+        self.assertIn('Quitar materia: Laboral', event.details['changes'])
+        reopened = self.client.get(url)
+        self.assertEqual(reopened.context['form'].initial['add_concepts'], 'Indemnización')
+        self.assertEqual(reopened.context['form'].initial['issues'], ['irrelevant'])
+        self.client.force_login(second)
+        self.assertEqual(self.client.post(url, payload).status_code, 409)
+        self.assertEqual(ReviewEvent.objects.filter(task=task).count(), 1)
+        task.refresh_from_db()
+        self.assertEqual(task.reviewed_by, first.username)
+        # Any proposed text remains inert in HTML, including the original JSON block.
+        malicious = '<img src=x onerror=alert(1)>'
+        self.assertEqual(self.client.post(url, {**payload, 'revision': 1, 'add_concepts': malicious}).status_code, 302)
+        escaped = self.client.get(url)
+        self.assertContains(escaped, '&lt;img')
+        self.assertNotContains(escaped, '<img src=x')
+        self.assertEqual(NormReview.objects.filter(task=task).count(), 0)
+
+    def test_zzzzz_relation_corrections_sources_and_no_change_cases(self):
+        user = User.objects.create_user('relation-proposer', is_staff=True)
+        self.client.force_login(user)
+        now = timezone.now()
+        run = CrawlRun.objects.create(requested_ids=[99201], started_at=now, status='ok', processed_count=1)
+        def norm(infoleg_id, number):
+            return Norm.objects.create(infoleg_id=infoleg_id, norm_type='Ley', number=number, general_status='desconocida', index_status='completa', article_count=1)
+        affected, amending, unrelated = norm(99201, '10001'), norm(99202, '23600'), norm(99203, '99999')
+        article = Article.objects.create(norm=affected, article_label='7', article_key='7', ordinal=1)
+        version = NormVersion.objects.create(norm=affected, version_type='actualizada', is_current=True)
+        av = ArticleVersion.objects.create(article=article, norm_version=version, text_original='Texto', text_normalized='Texto con nota de sustitución.', status='desconocido')
+        change = LegalChange.objects.create(amending_norm=amending, affected_norm=affected, affected_article=article,
+            source_article_version=av, amending_reference_raw='Ley 23600', amending_article_reference='2',
+            change_type='sustituye', affected_scope='articulo', evidence_text='inciso b)', parser_version='test',
+            confidence=.9, review_status='pendiente', fingerprint='relation-proposal-change', created_at=now, updated_at=now)
+        original = {'prediction': 'sustituye'}
+        task = ReviewTask.objects.create(crawl_run=run, norm=affected, article_version=av, legal_change=change, kind='pasaje',
+            source_text='(Inciso b) sustituido por art. 2 de la Ley 23600)', decision='revision', model_result=original,
+            prediction='sustituye', fingerprint='relation-proposal', created_at=now)
+        source = NormSource.objects.create(norm=affected, crawl_run=run, url=affected.infoleg_url, document_kind='texto_actualizado', retrieved_at=now, http_status=200, raw_content='<p>Artículo 7. Texto con nota.</p>')
+        other_run = CrawlRun.objects.create(requested_ids=[99202], started_at=now, status='ok', processed_count=1)
+        counterpart = NormSource.objects.create(norm=amending, crawl_run=other_run, url=amending.infoleg_url, document_kind='texto_original', retrieved_at=now, http_status=200, raw_content='<p>Artículo 2. Sustitúyese el inciso b).</p>')
+        stranger = NormSource.objects.create(norm=unrelated, crawl_run=run, url=unrelated.infoleg_url, document_kind='texto_original', retrieved_at=now, http_status=200, raw_content='<p>Otra norma.</p>')
+        wrong_run = NormSource.objects.create(norm=affected, crawl_run=other_run, url=affected.infoleg_url, document_kind='texto_actualizado', retrieved_at=now, http_status=200, raw_content='<p>Otro lote.</p>')
+        url = f'/validar/{task.pk}/'
+        page = self.client.get(url)
+        self.assertEqual(len(page.context['passage']['viewers']), 2)
+        self.assertContains(page, 'Verificar la relación entre normas.')
+        for src in (source, counterpart):
+            self.assertEqual(self.client.get(f'/validar/{task.pk}/fuente/{src.pk}/').status_code, 200)
+        for src in (stranger, wrong_run):
+            self.assertEqual(self.client.get(f'/validar/{task.pk}/fuente/{src.pk}/').status_code, 404)
+        initial = page.context['form'].initial
+        payload = {key: value for key, value in initial.items() if value is not None}
+        payload.update(status='rechazada', scope='inciso', scope_detail='b)', issues=['scope'])
+        self.assertEqual(self.client.post(url, payload).status_code, 302)
+        task.refresh_from_db(); change.refresh_from_db()
+        self.assertEqual(task.model_result, original)
+        self.assertEqual(change.affected_scope, 'articulo')
+        self.assertEqual(change.change_type, 'sustituye')
+        self.assertEqual(task.proposed_correction['scope'], 'inciso')
+        self.assertEqual(task.proposed_correction['scope_detail'], 'b)')
+        saved_sources = ReviewEvent.objects.get(task=task).details['sources']
+        self.assertEqual({row['id'] for row in saved_sources}, {source.pk, counterpart.pk})
+        self.assertEqual(self.client.get(url).context['form'].initial['scope_detail'], 'b)')
+        self.assertEqual(self.client.post(url, {**payload, 'revision': 1, 'status': 'validada'}).status_code, 400)
+        # A no-change classification has no invented target or modifying norm.
+        none = ReviewTask.objects.create(crawl_run=run, norm=affected, kind='pasaje', source_text='Cita informativa.', decision='sin_cambio_detectado', prediction='ninguno', fingerprint='relation-no-change', created_at=now)
+        none_url = f'/validar/{none.pk}/'
+        none_payload = dict(self.client.get(none_url).context['form'].initial)
+        none_payload.update(status='validada', notes='Sin modificación expresa en el fragmento.')
+        self.assertEqual(self.client.post(none_url, none_payload).status_code, 302)
+        none.refresh_from_db()
+        self.assertEqual(none.review_status, 'validada')
+        self.assertEqual(none.proposed_correction['amending_reference'], '')
+        self.assertEqual(self.client.get(url + '?section=invalid').status_code, 404)

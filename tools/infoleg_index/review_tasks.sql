@@ -51,3 +51,4 @@ CREATE TABLE IF NOT EXISTS norm_reviews (
 -- Controles de copia por persona, con evidencia del control en el historial.
 ALTER TABLE norm_reviews ADD COLUMN IF NOT EXISTS checks JSONB NOT NULL DEFAULT '{}';
 ALTER TABLE review_events ADD COLUMN IF NOT EXISTS details JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE review_tasks ADD COLUMN IF NOT EXISTS proposed_correction JSONB NOT NULL DEFAULT '{}';

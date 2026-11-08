@@ -7,6 +7,7 @@ from html.parser import HTMLParser
 from urllib.parse import urlencode, urlsplit
 
 from django.http import Http404, HttpResponse
+from django.db.models import Q
 from django.urls import reverse
 
 from .models import ArticleVersion, NormSource, NormVersion
@@ -195,8 +196,7 @@ class FocusAnchor(HTMLParser):
 
 def source_response(task, source_id, focus):
     from django.shortcuts import get_object_or_404
-    source = get_object_or_404(NormSource, pk=source_id, norm_id=task.norm_id,
-                               crawl_run_id=task.crawl_run_id, http_status__gte=200, http_status__lt=300)
+    source = get_object_or_404(available_sources(task), pk=source_id)
     if not source.raw_content or source.raw_content.lstrip().startswith('%PDF') or source.document_kind not in ('ficha', 'texto_original', 'texto_actualizado'):
         raise Http404
     viewer = FocusAnchor(focus[:100])
@@ -220,3 +220,13 @@ def source_response(task, source_id, focus):
     response['Cache-Control'] = 'private, no-store'
     response['X-Content-Type-Options'] = 'nosniff'
     return response
+
+
+def available_sources(task):
+    scope = Q(norm_id=task.norm_id, crawl_run_id=task.crawl_run_id)
+    if task.kind == 'pasaje' and task.legal_change_id:
+        related = {task.legal_change.amending_norm_id, task.legal_change.affected_norm_id} - {task.norm_id, None}
+        scope |= Q(norm_id__in=related)
+    return NormSource.objects.filter(scope, http_status__gte=200, http_status__lt=300,
+        document_kind__in=['ficha', 'texto_original', 'texto_actualizado']).exclude(
+        raw_content__isnull=True).exclude(raw_content='').exclude(raw_content__regex=r'^\s*%PDF')

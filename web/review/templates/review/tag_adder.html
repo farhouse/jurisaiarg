@@ -1,0 +1,7 @@
+<div class="tag-editor" data-tag-editor>
+  <label for="{{ field.id_for_label }}">{{ label }}</label>
+  {{ field }}
+  <small class="muted">Separá varias etiquetas con comas o saltos de línea.</small>
+  <div class="proposed-tags" data-tag-list aria-live="polite"></div>
+  {% for error in field.errors %}<p class="field-error" role="alert">{{ error }}</p>{% endfor %}
+</div>

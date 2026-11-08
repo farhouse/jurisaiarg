@@ -62,6 +62,7 @@ class WorkerIntegrationTest(unittest.TestCase):
             self.assertEqual(con.execute('SELECT count(*) FROM article_versions').fetchone()[0], 1)
             self.assertTrue(con.execute("SELECT model_result ? 'documents' FROM review_tasks WHERE crawl_run_id=%s ORDER BY id LIMIT 1", (run_id,)).fetchone()[0])
             self.assertEqual(con.execute("SELECT column_default FROM information_schema.columns WHERE table_name='norm_reviews' AND column_name='checks'").fetchone()[0], "'{}'::jsonb")
+            self.assertEqual(con.execute("SELECT column_default FROM information_schema.columns WHERE table_name='review_tasks' AND column_name='proposed_correction'").fetchone()[0], "'{}'::jsonb")
             task = con.execute('SELECT id FROM review_tasks WHERE crawl_run_id=%s ORDER BY id LIMIT 1', (run_id,)).fetchone()[0]
             con.execute("INSERT INTO norm_reviews(task_id,user_id,username,status,notes) VALUES (%s,1,'test','validada','evidencia')", (task,))
             con.commit()
