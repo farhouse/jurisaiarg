@@ -3,11 +3,11 @@ from django.db import connection
 from django.test import Client, TransactionTestCase
 from django.utils import timezone
 
-from .models import Article, ArticleVersion, CrawlItem, CrawlRun, LegalChange, Norm, NormReview, NormVersion, ReviewEvent, ReviewTask
+from .models import Article, ArticleVersion, CrawlItem, CrawlJob, CrawlRun, LegalChange, Norm, NormReview, NormVersion, ReviewEvent, ReviewTask
 
 
 class WorkflowTest(TransactionTestCase):
-    tables = [Norm, NormVersion, Article, ArticleVersion, LegalChange, CrawlRun, CrawlItem, ReviewTask, ReviewEvent, NormReview]
+    tables = [Norm, NormVersion, Article, ArticleVersion, LegalChange, CrawlRun, CrawlItem, ReviewTask, ReviewEvent, NormReview, CrawlJob]
 
     @classmethod
     def setUpClass(cls):
@@ -206,3 +206,76 @@ class WorkflowTest(TransactionTestCase):
         task.model_result={'articles':[{'label':'1','version':'original','text':'Texto guardado inmutable'}]}
         task.save()
         self.assertContains(self.client.get(f'/validar/{task.pk}/'), 'Texto guardado inmutable')
+
+    def test_zz_norm_tabs_scope_decisions_and_empty_states(self):
+        import uuid
+        from .workflow import review_url
+        user = User.objects.create_user('tabs-reviewer', is_staff=True)
+        self.client.force_login(user)
+        now = timezone.now()
+        run = CrawlRun.objects.create(requested_ids=[98001], started_at=now, status='ok', processed_count=1)
+        norm = Norm.objects.create(infoleg_id=98001, norm_type='Ley', number='23001', general_status='desconocida', index_status='completa', article_count=1)
+        def case(kind, fingerprint, **kwargs):
+            return ReviewTask.objects.create(crawl_run=run, norm=norm, kind=kind, source_text=fingerprint,
+                decision='revision', fingerprint=fingerprint, created_at=now, **kwargs)
+        copy = case('indice', 'tabs-copy')
+        topic = case('pasaje', 'tabs-topic', model_result={'category': 'temas', 'concepts': ['Salario']})
+        topic2 = case('pasaje', 'tabs-topic2', model_result={'category': 'temas'})
+        relation = case('pasaje', 'tabs-relation')
+        base = f'/validar/{copy.pk}/'
+        response = self.client.get(base)
+        self.assertEqual([(t['key'], t['total']) for t in response.context['tabs']], [('copy', 1), ('topics', 2), ('relations', 1)])
+        self.assertContains(response, 'Materias y tags')
+        self.assertContains(response, 'Relaciones')
+        # Old passage links still open that exact passage in its section.
+        self.assertEqual(self.client.get(f'/validar/{topic2.pk}/').context['task'].pk, topic2.pk)
+        topic_url = review_url(copy.pk, 'topics', topic.pk)
+        response = self.client.get(topic_url)
+        self.assertContains(response, 'Salario')
+        self.assertEqual(response.context['next_case']['id'], topic2.pk)
+        self.assertEqual(response.context['task'].pk, topic.pk)
+        # A POST to the root URL updates only the selected case, with revision protection.
+        response = self.client.post(topic_url, {'status': 'validada', 'revision': 0, 'continue': 1})
+        self.assertEqual(response.url, review_url(copy.pk, 'topics', topic2.pk))
+        topic.refresh_from_db()
+        copy.refresh_from_db()
+        self.assertEqual(topic.review_status, 'validada')
+        self.assertEqual(copy.review_status, 'pendiente')
+        self.assertFalse(NormReview.objects.filter(task=copy).exists())
+        self.assertEqual(self.client.post(topic_url, {'status': 'validada', 'revision': 0}).status_code, 409)
+        self.assertEqual(ReviewEvent.objects.filter(task=topic).count(), 1)
+        copy_url = review_url(copy.pk, 'copy', copy.pk)
+        self.assertEqual(self.client.post(copy_url, {'status': 'validada', 'revision': 0}).url, copy_url)
+        response = self.client.post(review_url(copy.pk, 'topics', topic2.pk), {'status': 'rechazada', 'revision': 0, 'notes': 'Falta una materia', 'continue': 1})
+        self.assertEqual(response.url, review_url(copy.pk, 'relations', relation.pk))
+        response = self.client.get(base + '?tab=topics')
+        self.assertEqual(response.context['active_tab']['reviewed'], 2)
+        # Another norm/run/section cannot be read or changed through this workspace.
+        other_norm = Norm.objects.create(infoleg_id=98002, norm_type='Ley', number='23002', general_status='desconocida', index_status='solo_ficha', article_count=0)
+        foreign = case('pasaje', 'tabs-foreign', model_result={'category': 'temas'})
+        foreign.norm = other_norm
+        foreign.save()
+        other_run = CrawlRun.objects.create(requested_ids=[98001], started_at=now, status='ok', processed_count=1)
+        foreign_run = case('pasaje', 'tabs-foreign-run', model_result={'category': 'temas'})
+        foreign_run.crawl_run = other_run
+        foreign_run.save()
+        for selected in (foreign.pk, foreign_run.pk, relation.pk, 'invalid'):
+            url = base + f'?tab=topics&case={selected}'
+            self.assertEqual(self.client.get(url).status_code, 404)
+            self.assertEqual(self.client.post(url, {'status': 'validada', 'revision': 0}).status_code, 404)
+        self.assertEqual(self.client.get(base + '?tab=invalid').status_code, 404)
+        self.assertEqual(self.client.get(base + '?tab=topics').context['active_tab']['total'], 2)
+        # Empty sections remain visible and never imply approval.
+        empty_url = f'/validar/{foreign.pk}/?tab=relations'
+        self.assertContains(self.client.get(empty_url), 'Pendiente de procesamiento')
+        self.assertEqual(self.client.post(empty_url, {'status': 'validada', 'revision': 0}).status_code, 404)
+        job = CrawlJob.objects.create(submission_id=uuid.uuid4(), start_id=98001, end_id=98002,
+            mode='process', crawl_run=run, status='running', requested_by=user.username, created_at=now)
+        self.assertContains(self.client.get(empty_url), 'Esperando resultados del procesamiento')
+        self.assertContains(self.client.get(base), 'contadores todavía son parciales')
+        job.status = 'failed'
+        job.save()
+        self.assertContains(self.client.get(empty_url), 'Procesamiento interrumpido')
+        job.status = 'done'
+        job.save()
+        self.assertContains(self.client.get(empty_url), 'Sin casos generados')

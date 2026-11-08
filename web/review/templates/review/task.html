@@ -1,14 +1,29 @@
 {% extends "base.html" %}
-{% block title %}Caso {{ task.pk }} · JurisAI{% endblock %}
+{% load static %}
+{% block title %}Revisar {{ norm.display_reference }} · JurisAI{% endblock %}
 {% block content %}
-<a class="back" href="{% url 'review:queue' %}?run={{ task.crawl_run_id }}">Volver a la mesa de revisión</a>
-<header class="work-heading"><div><h1>{{ task.norm.display_reference }}</h1><p>{{ task.get_kind_display }} · InfoLEG {{ task.norm.infoleg_id }} · Caso {{ task.pk }}</p></div><span>{% if task.kind == 'indice' %}Tu decisión: {% endif %}<span class="badge {{ task.review_status }}">{{ task.get_review_status_display }}</span></span></header>
+<a class="back" href="{% url 'review:queue' %}?run={{ run.pk }}">Volver a la mesa de revisión</a>
+<header class="work-heading"><div><h1>{{ norm.display_reference }}</h1><p>InfoLEG {{ norm.infoleg_id }} · {{ run.label }}</p></div></header>
+<section class="panel norm-review-source"><h2>{{ norm.display_title }}</h2><div class="source-links"><a href="{{ norm.infoleg_url }}" target="_blank" rel="noreferrer">Abrir fuente oficial en InfoLEG</a><a href="{% url 'review:norm_detail' norm.pk %}" target="_blank" rel="noreferrer">Ver archivo local completo</a></div></section>
+<nav class="norm-review-tabs" aria-label="Secciones de revisión de esta norma">
+  {% for tab in tabs %}<a href="{{ tab.url }}" {% if tab.key == active_tab.key %}aria-current="page"{% endif %}><strong>{{ tab.label }}</strong><span>{% if tab.total %}{{ tab.reviewed }} de {{ tab.total }} {% if tab.key == 'copy' %}revisados por vos{% else %}revisados{% endif %}{% else %}Sin casos preparados{% endif %}</span></a>{% endfor %}
+</nav>
+{% if processing_job.active %}<p class="notice">El procesamiento de este lote está {{ processing_job.get_status_display|lower }}. Los casos disponibles pueden aumentar; estos contadores todavía son parciales.</p>{% endif %}
+<section class="norm-review-section" aria-labelledby="review-section-title">
+<h2 id="review-section-title">{{ active_tab.label }}</h2>
+{% if active_tab.total %}<p>{{ active_tab.approved }} correctos · {{ active_tab.rejected }} incorrectos · {{ active_tab.pending }} pendientes.{% if active_tab.key == 'copy' %} Se muestra tu revisión de la copia.{% else %} Se muestra el resultado compartido de cada caso, incluidos los resultados automáticos por auditar.{% endif %}</p>{% endif %}
+{% if task %}
+{% if active_tab.total > 1 %}<form method="get" action="{% url 'review:task' root_id %}" class="review-case-picker">
+  <input type="hidden" name="tab" value="{{ active_tab.key }}">
+  <div><label for="review-case">Elegí el texto a revisar</label><select name="case" id="review-case">{% for case in section_cases %}<option value="{{ case.id }}" {% if case.id == task.pk %}selected{% endif %}>{% if case.article %}Artículo {{ case.article }} · {% else %}Ficha o fragmento · {% endif %}Caso {{ case.id }} · {{ case.status_label }}</option>{% endfor %}</select></div>
+  <button class="button">Ver caso</button>
+</form>{% endif %}
+<div class="review-case-position"><span>Caso {{ case_position }} de {{ active_tab.total }} · ID {{ task.pk }} · {% if task.kind == 'indice' %}Tu decisión: {% endif %}<span class="badge {{ task.review_status }}">{{ task.get_review_status_display }}</span></span><nav aria-label="Casos de esta sección">{% if previous_case %}<a href="{{ previous_case.url }}">Anterior</a>{% endif %}{% if next_case %}<a href="{{ next_case.url }}">Siguiente</a>{% endif %}</nav></div>
 {% if task.kind == 'indice' %}<p class="notice">Tu revisión es independiente. Cambiarla actualiza tu resultado; las decisiones de otras personas se conservan. {% if user.is_staff %}<a href="{% url 'review:law_reviews' task.pk %}">Ver resultados de esta norma</a>{% endif %}</p>{% endif %}
 <div class="review-layout">
   <section class="review-main">
-    <article class="panel"><h2>{{ task.norm.display_title }}</h2><div class="source-links"><a href="{{ task.norm.infoleg_url }}" target="_blank" rel="noreferrer">Abrir fuente oficial en InfoLEG</a><a href="{% url 'review:norm_detail' task.norm_id %}" target="_blank" rel="noreferrer">Ver archivo local completo</a></div></article>
     <section class="panel task-instructions"><h2>{% if task.kind == 'indice' %}Tu tarea: comprobar la copia de la norma{% elif task.model_result.category == 'temas' %}Tu tarea: revisar materias y conceptos{% else %}Tu tarea: comprobar la relación jurídica{% endif %}</h2>
-    {% if task.kind == 'indice' %}<ol><li>Compará el tipo, número y organismo con la ficha oficial.</li><li>Revisá debajo los artículos extraídos. Compará la misma versión en InfoLEG: orden, texto completo y anexos.</li><li>Marcá correcto solo si la copia es fiel. Si falta contenido, indicá dónde; si no podés comprobarlo, dejá pendiente.</li></ol><p>Esta decisión comprueba la descarga. Las materias y relaciones tienen sus propios casos.</p>
+    {% if task.kind == 'indice' %}<ol><li>Compará el tipo, número y organismo con la ficha oficial.</li><li>Revisá debajo los artículos extraídos. Compará la misma versión en InfoLEG: orden, texto completo y anexos.</li><li>Marcá correcto solo si la copia es fiel. Si falta contenido, indicá dónde; si no podés comprobarlo, dejá pendiente.</li></ol><p>Esta decisión comprueba la descarga. Revisá las otras tareas en las solapas Materias y tags y Relaciones.</p>
     {% elif task.model_result.category == 'temas' %}<ol><li>Leé el fragmento y, si hace falta, el artículo completo.</li><li>Comprobá que las materias describen su contenido central y que los conceptos ayudan a encontrarlo.</li><li>Si una etiqueta sobra o falta una importante, marcá incorrecto e indicá la corrección en Observaciones.</li></ol><p>Las materias no determinan qué tribunal es competente. No necesitás interpretar vectores ni puntajes.</p>
     {% else %}<p>Verificá el tipo de cambio, la norma modificadora, el artículo afectado y su alcance. Una cita aislada no prueba una modificación.</p>{% endif %}</section>
     <article class="panel evidence-panel"><h2>{% if task.kind == 'indice' %}Resultado de la descarga{% else %}Texto a comprobar{% endif %}</h2><div class="source-text">{{ task.source_text|linebreaks }}</div></article>
@@ -27,13 +42,28 @@
   <aside class="panel review-form"><h2>{% if task.kind == 'indice' %}Tu decisión{% else %}Decisión del caso{% endif %}</h2>
     {% if task.kind == 'pasaje' %}<p class="notice">Este caso tiene un resultado compartido. Guardar tu decisión actualiza ese resultado; la decisión anterior queda en el historial. Los votos sobre la copia de la norma son independientes.</p>{% endif %}
     {% if task.model_result.category == 'temas' %}<p class="review-intro">¿Las materias y los conceptos describen este texto sin omisiones importantes? Anotá las etiquetas que agregarías o quitarías.</p>{% elif task.kind == 'indice' %}<p class="review-intro">Compará la ficha y el texto local con InfoLEG. Comprobá identidad de la norma, artículos y contenido faltante. Si solo hay ficha, verificá que la fuente tampoco ofrezca texto.</p>{% else %}<p class="review-intro">Comprobá que la interpretación coincide con el pasaje completo, las normas y el alcance. Una clasificación correcta no confirma automáticamente la vigencia.</p>{% endif %}
-    <form method="post" class="stack-form">{% csrf_token %}{{ form.revision }}
-      {% for error in form.non_field_errors %}<p class="field-error" role="alert">{{ error }}</p><a href="{% url 'review:task' task.pk %}">Recargar el caso</a>{% endfor %}
+    <form method="post" action="{{ current_url }}" class="stack-form" id="case-decision" data-unsaved="{{ form.errors|yesno:'true,false' }}">{% csrf_token %}{{ form.revision }}
+      {% for error in form.non_field_errors %}<p class="field-error" role="alert">{{ error }}</p><a href="{{ current_url }}">Recargar el caso</a>{% endfor %}
       {% for error in form.revision.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
       <fieldset class="review-status-options"><legend>¿El resultado es correcto?</legend>{% for radio in form.status %}<label class="review-status-option">{{ radio.tag }}<span>{{ radio.choice_label }}</span></label>{% endfor %}{% for error in form.status.errors %}<p class="field-error">{{ error }}</p>{% endfor %}</fieldset>
       <label for="{{ form.notes.id_for_label }}">Observaciones</label>{{ form.notes }}<small class="muted">Obligatorias si marcás el caso como incorrecto. La corrección del dato se realiza por separado.</small>{% for error in form.notes.errors %}<p class="field-error" role="alert">{{ error }}</p>{% endfor %}
-      <button name="continue" value="1" class="button primary">Guardar y continuar</button><button class="button">Guardar y volver a la cola</button>
+      <button name="continue" value="1" class="button primary">Guardar y revisar siguiente</button><button class="button">Guardar y permanecer aquí</button>
     </form><p class="audit">Tu decisión se registra como {{ user.username }}.{% if task.reviewed_by %}<br>Última revisión: {{ task.reviewed_by }} · {{ task.reviewed_at|date:"d/m H:i" }}.{% endif %}</p>
   </aside>
 </div>
+
+<script src="{% static 'review-tabs.js' %}"></script>
+{% else %}
+<section class="panel">
+  {% if active_tab.key == 'copy' %}<h3>Copia pendiente de preparar</h3><p>Este lote todavía no tiene un control de copia para esta norma.</p>
+  {% elif processing_job.active %}<h3>Esperando resultados del procesamiento</h3><p>Aún no hay casos de {{ active_tab.label|lower }} disponibles para esta norma. Volvé a consultar cuando avance el lote.</p>
+  {% elif processing_job.status == 'failed' %}<h3>Procesamiento interrumpido</h3><p>El último procesamiento del lote no terminó y no hay casos de esta sección preparados para esta norma.</p>
+  {% elif processing_job.status == 'done' or processing_job.status == 'partial' %}<h3>Sin casos generados</h3><p>El procesamiento terminó, pero no dejó casos de esta sección para esta norma. Hace falta comprobar el contenido disponible y su procesamiento.</p>
+  {% else %}<h3>Pendiente de procesamiento</h3><p>No hay casos de {{ active_tab.label|lower }} preparados para esta norma en este lote.</p>{% endif %}
+  <p>La ausencia de casos no equivale a una validación ni demuestra que no haya temas o relaciones que revisar.</p>
+  {% if user.is_staff %}<a class="button" href="{% url 'review:crawl_jobs' %}">Ir a procesar un lote descargado</a>{% else %}<p>Pedile a un administrador que compruebe el procesamiento de este lote.</p>{% endif %}
+  <a class="button" href="{{ active_tab.url }}">Actualizar esta sección</a>
+</section>
+{% endif %}
+</section>
 {% endblock %}

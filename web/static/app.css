@@ -184,3 +184,24 @@ tbody th { font-weight:650; }.table-empty { padding:30px 12px; color:var(--muted
 
 @media (max-width: 850px) { .search-mode { width: 100%; flex-basis: auto; } }
 .pipeline-form button:disabled { background:var(--green-soft); color:var(--muted); cursor:not-allowed; }
+
+.norm-review-source h2 { margin-top:0; }
+.norm-review-tabs { display:flex; gap:8px; border-bottom:1px solid var(--line); margin:24px 0; }
+.norm-review-tabs a { flex:1; min-width:0; padding:14px 16px; text-decoration:none; color:var(--ink); border-bottom:3px solid transparent; }
+.norm-review-tabs a[aria-current="page"] { background:var(--green-soft); border-bottom-color:var(--green); }
+.norm-review-tabs a:hover { background:var(--green-soft); }
+.norm-review-tabs strong, .norm-review-tabs span { display:block; }
+.norm-review-tabs span { font-size:13px; margin-top:4px; }
+.norm-review-section > h2 { margin-bottom:8px; }
+.review-case-picker { display:flex; align-items:end; gap:12px; margin:20px 0; }
+.review-case-picker > div { flex:1; min-width:0; max-width:48rem; }
+.review-case-picker label { display:block; margin-bottom:6px; }
+.review-case-picker select { width:100%; }
+.review-case-position { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin:18px 0; }
+.review-case-position nav { display:flex; gap:20px; }
+@media (max-width:600px) {
+  .norm-review-tabs { flex-wrap:wrap; gap:0; }
+  .norm-review-tabs a { flex-basis:100%; padding:12px; }
+  .review-case-picker { flex-wrap:wrap; }
+  .review-case-picker > div { flex-basis:100%; }
+}

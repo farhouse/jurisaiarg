@@ -1,4 +1,5 @@
 from functools import wraps
+from urllib.parse import urlencode
 
 from django import forms
 from django.contrib import messages
@@ -12,7 +13,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import ArticleVersion, CrawlRun, LegalChange, NormReview, ReviewEvent, ReviewTask
+from .models import ArticleVersion, CrawlJob, CrawlRun, LegalChange, NormReview, ReviewEvent, ReviewTask
 
 
 def validator_required(view):
@@ -105,9 +106,75 @@ def queue(request):
     })
 
 
+def review_url(root_id, tab, case=None):
+    params = {'tab': tab}
+    if case is not None:
+        params['case'] = case
+    return reverse('review:task', args=[root_id]) + '?' + urlencode(params)
+
+
+def norm_sections(entry, user):
+    # Solo metadatos para navegar: el texto completo se carga al abrir cada caso.
+    rows = list(ReviewTask.objects.filter(norm_id=entry.norm_id, crawl_run_id=entry.crawl_run_id)
+                .order_by('id').values('id', 'kind', 'model_result__category', 'review_status',
+                                      'article_version__article__article_label'))
+    votes = dict(NormReview.objects.filter(task_id__in=[row['id'] for row in rows if row['kind'] == 'indice'],
+                                          user_id=user.pk).values_list('task_id', 'status'))
+    root_id = next((row['id'] for row in rows if row['kind'] == 'indice'), entry.pk)
+    tabs = {key: {'key': key, 'label': label, 'cases': [], 'approved': 0, 'rejected': 0, 'pending': 0,
+                  'url': review_url(root_id, key)}
+            for key, label in [('copy', 'Copia de la norma'), ('topics', 'Materias y tags'), ('relations', 'Relaciones')]}
+    labels = dict(ReviewTask._meta.get_field('review_status').choices)
+    for row in rows:
+        key = 'copy' if row['kind'] == 'indice' else ('topics' if row['model_result__category'] == 'temas' else 'relations')
+        status = votes.get(row['id'], 'pendiente') if key == 'copy' else row['review_status']
+        tab = tabs[key]
+        tab['cases'].append({'id': row['id'], 'status': status, 'status_label': labels[status],
+                             'article': row['article_version__article__article_label'],
+                             'url': review_url(root_id, key, row['id'])})
+        tab[{'validada': 'approved', 'rechazada': 'rejected', 'pendiente': 'pending'}[status]] += 1
+    for tab in tabs.values():
+        tab['total'] = len(tab['cases'])
+        tab['reviewed'] = tab['approved'] + tab['rejected']
+    return root_id, tabs
+
+
 @validator_required
 def task_detail(request, pk):
-    task = get_object_or_404(ReviewTask.objects.select_related("norm", "article_version__norm_version", "legal_change__amending_norm"), pk=pk)
+    entry = get_object_or_404(ReviewTask.objects.select_related('norm', 'crawl_run'), pk=pk)
+    root_id, tabs = norm_sections(entry, request.user)
+    default_tab = 'copy' if entry.kind == 'indice' else ('topics' if entry.model_result.get('category') == 'temas' else 'relations')
+    tab_key = request.GET.get('tab', default_tab)
+    if tab_key not in tabs:
+        raise Http404
+    active_tab = tabs[tab_key]
+    cases = active_tab['cases']
+    selected = request.GET.get('case')
+    if selected is not None:
+        try:
+            selected_id = int(selected)
+        except ValueError:
+            raise Http404
+        current = next((case for case in cases if case['id'] == selected_id), None)
+        if current is None:
+            raise Http404  # Nunca abrir ni modificar un caso de otra norma, lote o solapa.
+    elif 'tab' not in request.GET:
+        current = next(case for case in cases if case['id'] == entry.pk)
+    else:
+        current = next((case for case in cases if case['status'] == 'pendiente'), cases[0] if cases else None)
+    job = CrawlJob.objects.filter(crawl_run_id=entry.crawl_run_id, mode__in=['full', 'process']).order_by('-id').first()
+    context = {'norm': entry.norm, 'run': entry.crawl_run, 'root_id': root_id,
+               'tabs': tabs.values(), 'active_tab': active_tab, 'section_cases': cases, 'processing_job': job}
+    if current is None:
+        if request.method == 'POST':
+            raise Http404
+        return render(request, 'review/task.html', context)
+    task = get_object_or_404(ReviewTask.objects.select_related('norm', 'article_version__norm_version',
+                              'legal_change__amending_norm'), pk=current['id'])
+    position = cases.index(current)
+    context.update(case_position=position + 1, previous_case=cases[position - 1] if position else None,
+                   next_case=cases[position + 1] if position + 1 < len(cases) else None,
+                   current_url=current['url'])
     own_vote = NormReview.objects.filter(task=task, user_id=request.user.pk).first() if task.kind == "indice" else None
     if task.kind == "indice":
         task.review_status = own_vote.status if own_vote else "pendiente"
@@ -120,7 +187,7 @@ def task_detail(request, pk):
         form = DecisionForm(request.POST)
         if form.is_valid():
             with transaction.atomic():
-                locked = ReviewTask.objects.select_for_update().get(pk=pk)
+                locked = ReviewTask.objects.select_for_update().get(pk=task.pk)
                 vote = NormReview.objects.filter(task=locked, user_id=request.user.pk).first() if locked.kind == "indice" else None
                 revision = (vote.revision if vote else 0) if locked.kind == "indice" else locked.revision
                 if revision != form.cleaned_data["revision"]:
@@ -144,10 +211,15 @@ def task_detail(request, pk):
                             LegalChange.objects.filter(pk=locked.legal_change_id).update(review_status=status, review_notes=notes, reviewed_by=locked.reviewed_by, reviewed_at=locked.reviewed_at, updated_at=now)
             if code != 409:
                 messages.success(request, "Decisión guardada. Quedó registrada con tu usuario y fecha.")
-                next_task = pending_tasks(ReviewTask.objects.filter(crawl_run=task.crawl_run, decision="revision"), request.user).exclude(pk=pk).order_by("kind", "id").first()
-                if request.POST.get("continue") and next_task:
-                    return redirect("review:task", pk=next_task.pk)
-                return redirect(reverse("review:queue") + f"?run={task.crawl_run_id}")
+                if request.POST.get('continue'):
+                    _, updated_tabs = norm_sections(task, request.user)
+                    order = [tab_key] + [key for key in tabs if key != tab_key]
+                    for key in order:
+                        next_case = next((case for case in updated_tabs[key]['cases']
+                                          if case['status'] == 'pendiente' and case['id'] != task.pk), None)
+                        if next_case:
+                            return redirect(next_case['url'])
+                return redirect(current['url'])
         elif code == 200:
             code = 400
     articles = task.model_result.get('articles', [])
@@ -155,8 +227,9 @@ def task_detail(request, pk):
         articles = [{'label': av.article.article_label, 'version': av.norm_version.version_type,
                      'text': av.text_normalized} for av in ArticleVersion.objects.filter(
                          article__norm=task.norm).select_related('article', 'norm_version').order_by('norm_version_id','article__ordinal')]
-    return render(request, "review/task.html", {"task": task, "form": form, 'articles': articles,
-        'snapshot': 'articles' in task.model_result, "history": task.events.order_by("-id")[:10]}, status=code)
+    context.update(task=task, form=form, articles=articles,
+                   snapshot='articles' in task.model_result, history=task.events.order_by('-id')[:10])
+    return render(request, 'review/task.html', context, status=code)
 
 
 STATUS_LABELS = {
