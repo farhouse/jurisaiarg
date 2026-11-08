@@ -183,3 +183,4 @@ tbody th { font-weight:650; }.table-empty { padding:30px 12px; color:var(--muted
 @media (max-width: 600px) { .pipeline-form .crawl-range { grid-template-columns: 1fr; } .law-search { flex-wrap: wrap; } .search-mode { width: 100%; flex-basis: auto; } }
 
 @media (max-width: 850px) { .search-mode { width: 100%; flex-basis: auto; } }
+.pipeline-form button:disabled { background:var(--green-soft); color:var(--muted); cursor:not-allowed; }

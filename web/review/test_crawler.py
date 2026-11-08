@@ -54,6 +54,14 @@ class CrawlerAdminTest(TransactionTestCase):
         response_process = self.client.post(url, process)
         self.assertEqual(response_process.status_code, 302)
         self.assertEqual(CrawlJob.objects.get(mode='process').crawl_run_id, run.pk)
+        from .crawler import CrawlForm
+        process_form = CrawlForm({**process, 'start_id': 'ignorar', 'end_id': -1})
+        self.assertTrue(process_form.is_valid(), process_form.errors)
+        self.assertEqual((process_form.cleaned_data['start_id'], process_form.cleaned_data['end_id']), (201, 202))
+        for mode in ('full', 'download'):
+            download_form = CrawlForm({**payload, 'mode': mode, 'run': 'lote-inexistente'})
+            self.assertTrue(download_form.is_valid(), download_form.errors)
+            self.assertIsNone(download_form.cleaned_data['run'])
         self.assertEqual(self.client.post(url, {**process, 'run': 999999, 'submission_id': uuid.uuid4()}).status_code, 400)
         job.status = 'failed'
         job.error = '<script>unsafe</script>'

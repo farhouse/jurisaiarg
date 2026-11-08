@@ -21,6 +21,11 @@ class CrawlForm(forms.Form):
         super().__init__(*args, **kwargs)
         self.fields['run'].queryset = CrawlRun.objects.filter(finished_at__isnull=False, status__in=["ok", "partial"]).exclude(requested_ids=[]).exclude(requested_ids=None)
         self.fields['run'].label_from_instance = lambda run: run.label
+        if self.is_bound:
+            # Los campos de otra tarea no participan en la validación ni el envío.
+            inactive = ('start_id', 'end_id') if self.data.get('mode') == 'process' else ('run',)
+            for name in inactive:
+                self.fields[name].disabled = True
 
     def clean(self):
         data = super().clean()

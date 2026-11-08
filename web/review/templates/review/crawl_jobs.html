@@ -1,21 +1,27 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}Descargar y procesar · JurisAI{% endblock %}
 {% block content %}
 <a class="back" href="{% url 'review:management' %}">Volver a Gestión</a>
 <header class="work-heading"><div><h1>Descargar y procesar</h1><p>Primero guardamos las fuentes. Después clasificamos el contenido y preparamos la búsqueda y la revisión.</p></div></header>
 <section class="panel crawl-request" aria-labelledby="new-job">
   <h2 id="new-job">Nueva solicitud</h2>
-  <form method="post" class="stack-form pipeline-form">
+  <form method="post" class="stack-form pipeline-form" id="crawl-request-form">
     {% csrf_token %}{{ form.submission_id }}{{ form.submission_id.errors }}{{ form.non_field_errors }}
     <label for="{{ form.mode.id_for_label }}">{{ form.mode.label }}</label>{{ form.mode }}{{ form.mode.errors }}
-    <p class="muted">«Solo descargar» guarda la ficha, el texto y las relaciones del parser. «Procesar un lote descargado» agrega Laya y búsqueda semántica sin volver a descargar.</p>
-    <fieldset><legend>Para una descarga nueva</legend><p id="range-help">IDs de InfoLEG, no números de ley. Ambos extremos están incluidos; hasta 1.000 índices por lote.</p>
+    <p class="muted" id="mode-help" aria-live="polite">Completá el rango para una descarga nueva o elegí el lote para procesar una descarga existente.</p>
+    <fieldset id="download-fields"><legend>Rango de índices a descargar</legend><p id="range-help">IDs de InfoLEG, no números de ley. Ambos extremos están incluidos; hasta 1.000 índices por lote.</p>
       <div class="crawl-range"><div><label for="{{ form.start_id.id_for_label }}">{{ form.start_id.label }}</label>{{ form.start_id }}{{ form.start_id.errors }}</div><div><label for="{{ form.end_id.id_for_label }}">{{ form.end_id.label }}</label>{{ form.end_id }}{{ form.end_id.errors }}</div></div>
+      {% if last_id %}<p class="muted">Mayor ID presente: <strong>{{ last_id }}</strong>. Puede haber huecos anteriores.</p>{% endif %}
     </fieldset>
-    <div><label for="{{ form.run.id_for_label }}">Para procesar una descarga existente</label>{{ form.run }}{{ form.run.errors }}<p class="muted">Elegí el lote solo si seleccionaste «Procesar un lote descargado». Los resultados ya calculados se reutilizan y las revisiones se conservan.</p></div>
-    <button class="button primary" type="submit">Encolar solicitud</button>
+    <fieldset id="existing-fields"><legend>Descarga existente</legend>
+      <label for="{{ form.run.id_for_label }}">Lote a procesar</label>{{ form.run }}{{ form.run.errors }}
+      <p class="muted">Los resultados ya calculados se reutilizan y las revisiones se conservan.</p>
+      <p id="no-batches" hidden>No hay lotes descargados disponibles. Elegí «Descargar y procesar» o «Solo descargar» para crear uno.</p>
+    </fieldset>
+    <button class="button primary" type="submit" id="enqueue-request">Encolar solicitud</button>
   </form>
-  {% if last_id %}<p class="muted">Mayor ID presente: <strong>{{ last_id }}</strong>. Puede haber huecos anteriores.</p>{% endif %}
+  <script src="{% static 'crawl-form.js' %}"></script>
 </section>
 <section class="panel table-panel" aria-labelledby="jobs">
 <div class="section-title"><h2 id="jobs">Historial de solicitudes</h2><a href="{% url 'review:crawl_jobs' %}">Actualizar listado</a></div>
