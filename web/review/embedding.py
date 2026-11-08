@@ -21,7 +21,10 @@ def runtime():
 def fragments(text):
     """Ventanas exactas del original; 400 tokens + prefijo caben en 512."""
     tokenizer, _ = runtime()
-    offsets = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)['offset_mapping']
+    # Aquí solo medimos el original para dividirlo; no se envía completo al modelo.
+    # encode() conserva el control de longitud antes de cualquier inferencia.
+    offsets = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True,
+                        truncation=False, verbose=False)['offset_mapping']
     for start in range(0, len(offsets), 350):
         end = min(start + 400, len(offsets))
         yield text[offsets[start][0]:offsets[end - 1][1]]
