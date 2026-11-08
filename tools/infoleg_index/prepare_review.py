@@ -68,9 +68,12 @@ def main(argv=None, router=None, report=None, ensure_model=None):
                   WHERE norm_id=a.norm_id ORDER BY version_type,id DESC)
                 ORDER BY nv.id,a.ordinal,av.id''', (norm_id,)).fetchall()
             text = f"InfoLEG {infoleg_id}\n{title or subject or 'Sin título'}\nEstado de descarga: {status.replace('_', ' ')}\nArtículos disponibles: {article_count}"
+            documents = con.execute('''SELECT DISTINCT ON (version_type) version_type,full_text_original
+                FROM norm_versions WHERE norm_id=%s ORDER BY version_type,id DESC''', (norm_id,)).fetchall()
             save_task(con, args.run_id, norm_id, "indice", text,
                       {"decision": "revision", "review_reasons": ["control_del_indice"],
                        "identity": dict(zip(('type','number','issuer','summary'), identity)),
+                       "documents": [dict(zip(('version', 'text'), row)) for row in documents],
                        "articles": [dict(zip(('label','version','text'), row)) for row in articles]},
                       key=f"index:{args.run_id}:{norm_id}")
         if args.indices_only:

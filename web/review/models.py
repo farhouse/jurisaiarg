@@ -89,6 +89,8 @@ class NormVersion(models.Model):
     valid_from = models.DateField(null=True)
     valid_to = models.DateField(null=True)
     is_current = models.BooleanField()
+    source = models.ForeignKey('NormSource', models.DO_NOTHING, null=True)
+    full_text_original = models.TextField(null=True)
 
     class Meta:
         managed = False
@@ -285,6 +287,7 @@ class NormReview(models.Model):
     username = models.TextField()
     status = models.TextField(choices=ReviewTask._meta.get_field("review_status").choices)
     notes = models.TextField(default="")
+    checks = models.JSONField(default=dict)
     revision = models.IntegerField(default=1)
     updated_at = models.DateTimeField()
 
@@ -300,8 +303,23 @@ class ReviewEvent(models.Model):
     previous_status = models.TextField()
     status = models.TextField()
     notes = models.TextField()
+    details = models.JSONField(default=dict)
     created_at = models.DateTimeField()
 
     class Meta:
         managed = False
         db_table = "review_events"
+
+
+class NormSource(models.Model):
+    norm = models.ForeignKey(Norm, models.DO_NOTHING)
+    crawl_run = models.ForeignKey(CrawlRun, models.DO_NOTHING, null=True)
+    url = models.TextField()
+    document_kind = models.TextField()
+    retrieved_at = models.DateTimeField()
+    http_status = models.IntegerField(null=True)
+    raw_content = models.TextField(null=True)
+
+    class Meta:
+        managed = False
+        db_table = 'norm_sources'

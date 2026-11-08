@@ -3,11 +3,11 @@ from django.db import connection
 from django.test import Client, TransactionTestCase
 from django.utils import timezone
 
-from .models import Article, ArticleVersion, CrawlItem, CrawlJob, CrawlRun, LegalChange, Norm, NormReview, NormVersion, ReviewEvent, ReviewTask
+from .models import Article, ArticleVersion, CrawlItem, CrawlJob, CrawlRun, LegalChange, Norm, NormReview, NormSource, NormVersion, ReviewEvent, ReviewTask
 
 
 class WorkflowTest(TransactionTestCase):
-    tables = [Norm, NormVersion, Article, ArticleVersion, LegalChange, CrawlRun, CrawlItem, ReviewTask, ReviewEvent, NormReview, CrawlJob]
+    tables = [Norm, CrawlRun, NormSource, NormVersion, Article, ArticleVersion, LegalChange, CrawlItem, ReviewTask, ReviewEvent, NormReview, CrawlJob]
 
     @classmethod
     def setUpClass(cls):
@@ -205,7 +205,7 @@ class WorkflowTest(TransactionTestCase):
         task.kind='indice'
         task.model_result={'articles':[{'label':'1','version':'original','text':'Texto guardado inmutable'}]}
         task.save()
-        self.assertContains(self.client.get(f'/validar/{task.pk}/'), 'Texto guardado inmutable')
+        self.assertContains(self.client.get(f'/validar/{task.pk}/?step=articles'), 'Texto guardado inmutable')
 
     def test_zz_norm_tabs_scope_decisions_and_empty_states(self):
         import uuid
@@ -279,3 +279,93 @@ class WorkflowTest(TransactionTestCase):
         job.status = 'done'
         job.save()
         self.assertContains(self.client.get(empty_url), 'Sin casos generados')
+
+    def test_zzz_guided_copy_controls_source_isolation_and_resume(self):
+        admin = User.objects.create_user('guided-admin', is_staff=True)
+        other = User.objects.create_user('guided-other', is_staff=True)
+        reader = User.objects.create_user('guided-reader')
+        now = timezone.now()
+        run = CrawlRun.objects.create(requested_ids=[99001], started_at=now, finished_at=now, status='ok', processed_count=1)
+        norm = Norm.objects.create(infoleg_id=99001, norm_type='Ley', number='23600', general_status='desconocida', index_status='solo_texto_original', article_count=2)
+        task = ReviewTask.objects.create(crawl_run=run, norm=norm, kind='indice', source_text='Ficha de ejemplo', decision='revision', fingerprint='guided-copy', created_at=now, model_result={
+            'identity': {'type': 'Ley', 'number': '23600', 'issuer': 'Congreso'},
+            'articles': [{'label': '1', 'version': 'original', 'text': 'Artículo 1. Texto extraído.'},
+                         {'label': '2', 'version': 'original', 'text': 'Artículo 2. Comuníquese.'}],
+            'documents': [{'version': 'original', 'text': 'Texto completo\nANEXO I\nContenido del anexo.'}]})
+        card = NormSource.objects.create(norm=norm, crawl_run=run, url=norm.infoleg_url,
+            document_kind='ficha', retrieved_at=now, http_status=200, raw_content='<h1>Ley 23600</h1>')
+        source = NormSource.objects.create(norm=norm, crawl_run=run,
+            url='https://servicios.infoleg.gob.ar/infolegInternet/anexos/0-4999/1/norma.htm',
+            document_kind='texto_original', retrieved_at=now, http_status=200,
+            raw_content='<!doctype html><html><head><style>body { color: black; }</style></head><body><h1>Ley 23600</h1><p>Artículo 1. Texto de la fuente.</p><p>Artículo 2. Comuníquese.</p><h2>ANEXO I</h2><script>parent.document.body.remove()</script></body></html>')
+        source_url = f'/validar/{task.pk}/fuente/{source.pk}/'
+        self.assertEqual(self.client.get(source_url).status_code, 302)
+        self.client.force_login(reader)
+        self.assertEqual(self.client.get(source_url).status_code, 403)
+        self.client.force_login(admin)
+        view = self.client.get(source_url + '?focus=2')
+        self.assertContains(view, '<span id="jurisai-focus">Artículo 2</span>.')
+        self.assertTrue(view.content.startswith(b'<!doctype html>'))
+        self.assertContains(view, '<head><base href=')
+        self.assertEqual(view['X-Frame-Options'], 'SAMEORIGIN')
+        self.assertIn("default-src 'none'", view['Content-Security-Policy'])
+        self.assertIn('; sandbox', view['Content-Security-Policy'])
+        self.assertEqual(view['Cache-Control'], 'private, no-store')
+        self.assertEqual(self.client.post(source_url).status_code, 405)
+        other_run = CrawlRun.objects.create(requested_ids=[99001], started_at=now, status='ok', processed_count=1)
+        foreign = NormSource.objects.create(norm=norm, crawl_run=other_run, url=norm.infoleg_url,
+            document_kind='texto_original', retrieved_at=now, http_status=200, raw_content='<p>Fuente de otro lote</p>')
+        self.assertEqual(self.client.get(f'/validar/{task.pk}/fuente/{foreign.pk}/').status_code, 404)
+        url = f'/validar/{task.pk}/'
+        page = self.client.get(url)
+        self.assertContains(page, 'Comparar textos, deben ser iguales.')
+        self.assertContains(page, 'sandbox=""')
+        self.assertEqual(page.context['copy']['checked_count'], 0)
+        checks = page.context['copy']['checks']
+        self.assertEqual(len(checks), 4)
+        revision = 0
+        for index, check in enumerate(checks):
+            response = self.client.post(check['url'], {'check': check['key'], 'status': 'validada', 'revision': revision, 'continue': 1})
+            self.assertEqual(response.status_code, 302)
+            revision += 1
+            vote = NormReview.objects.get(task=task, user_id=admin.pk)
+            self.assertEqual(vote.status, 'validada' if index == len(checks) - 1 else 'pendiente')
+            self.assertEqual(vote.checks[check['key']]['source_id'], card.pk if index == 0 else source.pk)
+        self.assertIn('step=summary', response.url)
+        summary = self.client.get(response.url)
+        self.assertEqual(summary.context['copy']['checked_count'], 4)
+        annex = self.client.get(checks[-1]['url'])
+        self.assertContains(annex, 'Contenido del anexo.')
+        article = checks[1]
+        # A confirmed difference remains visible after returning to another step.
+        rejected = self.client.post(article['url'], {'check': article['key'], 'status': 'rechazada', 'revision': revision, 'issues': ['missing_text']})
+        self.assertEqual(rejected.status_code, 302)
+        vote.refresh_from_db()
+        self.assertEqual(vote.status, 'rechazada')
+        self.assertEqual(vote.checks[article['key']]['issues'], ['missing_text'])
+        event = ReviewEvent.objects.filter(task=task).last()
+        self.assertEqual(event.details['check'], article['key'])
+        self.assertEqual(event.details['status'], 'rechazada')
+        self.assertIn('Falta texto', event.notes)
+        resumed = self.client.get(article['url'])
+        self.assertEqual(resumed.context['form'].initial['status'], 'rechazada')
+        self.assertEqual(self.client.post(article['url'], {'check': article['key'], 'status': 'validada', 'revision': revision}).status_code, 409)
+        self.assertEqual(self.client.post(article['url'], {'check': 'invented', 'status': 'validada', 'revision': vote.revision}).status_code, 400)
+        self.assertEqual(self.client.post(article['url'], {'check': article['key'], 'status': 'validada', 'revision': vote.revision, 'issues': ['missing_text']}).status_code, 400)
+        # Independent identity and progress for the next reviewer.
+        self.client.force_login(other)
+        self.assertEqual(self.client.get(url).context['copy']['checked_count'], 0)
+        self.assertEqual(NormReview.objects.filter(task=task).count(), 1)
+        # No stored source may be replaced with one from a different run.
+        source.raw_content = ''
+        source.save()
+        missing = self.client.get(article['url'])
+        self.assertContains(missing, 'No hay una fuente disponible para comparar')
+        self.assertEqual(self.client.post(article['url'], {'check': article['key'], 'status': 'validada', 'revision': 0}).status_code, 400)
+        self.assertFalse(NormReview.objects.filter(task=task, user_id=other.pk).exists())
+        source.raw_content = '%PDF-1.7 archivo binario'
+        source.save()
+        self.assertIsNone(self.client.get(article['url']).context['copy']['source'])
+        self.assertEqual(self.client.get(source_url).status_code, 404)
+        for query in ('?step=unknown', '?step=articles&article=-1', '?step=articles&article=garbage', '?version=invalid'):
+            self.assertEqual(self.client.get(url + query).status_code, 404)

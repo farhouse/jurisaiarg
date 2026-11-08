@@ -28,7 +28,7 @@
       </nav>
     {% endif %}
   </header>
-  <main class="container">
+  <main class="container {% block container_class %}{% endblock %}">
     {% for message in messages %}<div class="message">{{ message }}</div>{% endfor %}
     {% block content %}{% endblock %}
   </main>

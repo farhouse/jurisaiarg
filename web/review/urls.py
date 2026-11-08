@@ -11,6 +11,7 @@ urlpatterns = [
     path("validar/", workflow.queue, name="queue"),
     path("validar/guia/", workflow.guide, name="guide"),
     path("validar/<int:pk>/", workflow.task_detail, name="task"),
+    path("validar/<int:pk>/fuente/<int:source_id>/", workflow.copy_source, name="copy_source"),
     path("gestion/", workflow.management, name="management"),
     path("gestion/validadores/", validators.index, name="validators"),
     path("gestion/validadores/nuevo/", validators.create, name="validator_create"),

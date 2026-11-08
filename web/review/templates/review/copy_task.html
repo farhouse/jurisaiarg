@@ -1,0 +1,54 @@
+<nav class="copy-steps" aria-label="Pasos de revisión de la copia">
+  {% for item in copy.steps %}<a href="{{ item.url }}" {% if item.key == copy.step %}aria-current="step"{% endif %} class="{% if item.complete %}complete{% endif %}"><span class="step-number">{% if item.complete %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>{% else %}{{ forloop.counter }}{% endif %}</span><span>{{ item.label }}{% if item.total %}<small>{{ item.done }} de {{ item.total }}</small>{% endif %}</span></a>{% endfor %}
+</nav>
+{% if copy.legacy_vote %}<p class="copy-context-note">Tu decisión anterior sobre la norma completa se conserva: <strong>{{ task.get_review_status_display }}</strong>. Todavía no tiene controles desglosados. Al guardar uno, el resultado se actualizará con el avance de esta revisión.</p>{% endif %}
+{% if not copy.snapshot %}<p class="copy-context-note">Este caso antiguo no guardó el texto extraído al crearse. Se muestra el archivo local disponible; la fuente corresponde al lote indicado.</p>{% endif %}
+{% if copy.step == 'summary' %}
+<section class="copy-summary" aria-labelledby="copy-summary-heading">
+  <header><h2 id="copy-summary-heading">Resumen de tu revisión</h2><p>{{ copy.checked_count }} de {{ copy.check_count }} controles completos · Resultado de la copia: <span class="badge {{ task.review_status }}">{{ task.get_review_status_display }}</span></p></header>
+  <p>La copia queda correcta cuando todos los controles son correctos. Un error confirmado queda registrado aunque todavía falten otros controles.</p>
+  <ul class="copy-check-list">{% for check in copy.checks %}<li><div><strong>{{ check.label }}</strong>{% if check.notes %}<p>{{ check.notes }}</p>{% endif %}</div><span class="badge {{ check.status }}">{{ check.status_label }}</span><a href="{{ check.url }}">Revisar<span class="visually-hidden"> {{ check.label }}</span></a></li>{% endfor %}</ul>
+  <p>Esta revisión comprueba la copia. Las materias, los tags y las relaciones se revisan en sus solapas.</p>
+  <footer class="copy-summary-actions">{% if user.is_staff %}<a class="button" href="{% url 'review:law_reviews' task.pk %}">Ver revisiones de esta norma</a>{% endif %}{% for tab in tabs %}{% if tab.key == 'topics' %}<a class="button primary" href="{{ tab.url }}">Continuar con Materias y tags</a>{% endif %}{% endfor %}<a class="button" href="{% url 'review:queue' %}?run={{ run.pk }}">Volver a la mesa de revisión</a></footer>
+</section>
+{% else %}
+<header class="copy-work-heading">
+  <div><h2>Comparar textos, deben ser iguales.</h2><p>{% if copy.step == 'identity' %}Compará tipo, número, organismo y resumen con la ficha de InfoLEG.{% elif copy.step == 'articles' %}Compará ambos textos. Marcá cualquier frase que falte o haya cambiado.{% else %}Compará los anexos de la fuente con el contenido extraído. Si la fuente no tiene anexos, también podés dejarlo registrado.{% endif %}</p></div>
+  {% if copy.control.article %}<span class="copy-article-count">Artículo {{ copy.control.position }} de {{ copy.control.article_total }}</span>{% endif %}
+</header>
+{% if copy.step != 'identity' %}<form method="get" action="{% url 'review:task' root_id %}" class="copy-navigation">
+  <input type="hidden" name="tab" value="copy"><input type="hidden" name="case" value="{{ task.pk }}"><input type="hidden" name="step" value="{{ copy.step }}">
+  <label for="copy-version">Versión <select id="copy-version" name="version">{% for version in copy.versions %}<option value="{{ version.key }}" {% if version.key == copy.version %}selected{% endif %}>{{ version.label }}</option>{% endfor %}</select></label><button class="button">Ver versión</button>
+  {% if copy.control %}<a href="{{ copy.previous_url|default:copy.summary_url }}">Anterior</a><a href="{{ copy.next_url }}">{% if copy.step == 'articles' %}Siguiente artículo o paso{% else %}Ir al resumen{% endif %}</a>{% endif %}
+</form>{% endif %}
+<div class="copy-comparison">
+  <section class="copy-document" aria-labelledby="source-heading">
+    <header><h3 id="source-heading">Fuente: InfoLEG</h3><span>{{ copy.source_label }}{% if copy.source %} · Descargada el {{ copy.source.retrieved_at|date:'d/m/Y H:i' }}{% endif %}</span></header>
+    {% if copy.source_url %}
+    <div class="copy-source-address">{% if copy.official_url %}<a href="{{ copy.official_url }}" target="_blank" rel="noreferrer">{{ copy.official_url }}<span class="visually-hidden"> (abrir fuente en otra pestaña)</span></a>{% else %}<span>Documento guardado en este lote</span>{% endif %}</div>
+    <iframe class="copy-source-frame" title="Fuente de InfoLEG: {% if copy.step == 'identity' %}ficha de la norma{% elif copy.step == 'articles' %}articulado de la norma{% else %}anexos{% endif %}" src="{{ copy.source_url }}" loading="lazy" sandbox="" referrerpolicy="no-referrer"></iframe>
+    <p class="copy-document-note">Fuente descargada antes de la extracción. Podés desplazarte dentro del documento para leer el contexto completo.</p>
+    {% else %}<div class="copy-missing"><h3>No hay una fuente disponible para comparar</h3><p>Este lote no tiene una copia utilizable de {% if copy.step == 'identity' %}la ficha{% else %}{{ copy.version_label|lower }}{% endif %}. Dejá pendiente este control y solicitá completar la descarga.</p><a href="{{ norm.infoleg_url }}" target="_blank" rel="noreferrer">Consultar la ficha en InfoLEG</a></div>{% endif %}
+  </section>
+  <section class="copy-document" aria-labelledby="extraction-heading">
+    <header><h3 id="extraction-heading">Extracción de JurisAI</h3><span>{% if copy.step == 'identity' %}Ficha extraída{% else %}{{ copy.version_label }}{% endif %}</span></header>
+    <div class="copy-extraction">
+      {% if copy.step == 'identity' %}<dl class="copy-identity"><div><dt>Tipo</dt><dd>{{ copy.control.identity.type|default:'No disponible' }}</dd></div><div><dt>Número</dt><dd>{{ copy.control.identity.number|default:'No disponible' }}</dd></div><div><dt>Organismo</dt><dd>{{ copy.control.identity.issuer|default:'No disponible' }}</dd></div></dl><h4>{{ norm.display_title }}</h4><details class="copy-download-details"><summary>Detalle de la descarga</summary><div class="source-text">{{ task.source_text|linebreaks }}</div></details><h4>Resumen extraído</h4><div class="source-text">{{ copy.control.identity.summary|default:'No se extrajo un resumen.'|linebreaks }}</div>
+      {% elif copy.step == 'articles' and not copy.control.missing %}<p class="copy-extracted-reference">{{ norm.display_reference }} · {{ norm.display_title }}</p><h4>Artículo {{ copy.control.article.label }}</h4><div class="source-text">{{ copy.control.article.text|linebreaks }}</div>
+      {% elif copy.step == 'articles' %}<h4>No hay artículos extraídos</h4><p>Compará la fuente y comprobá si falta contenido. Marcá «Hay diferencias» si la fuente contiene artículos que no están aquí. «Sí, coincide» corresponde solo si comprobaste que la fuente tampoco ofrece articulado.</p>
+      {% else %}<h4>Anexos y contenido completo</h4>{% if copy.annex_text %}<p class="muted">{% if copy.annex_snapshot %}Texto guardado al preparar este caso.{% else %}Texto del archivo local vinculado a esta fuente.{% endif %}</p><div class="source-text">{{ copy.annex_text|linebreaks }}</div>{% else %}<p>No hay anexos extraídos por separado. Revisá también si quedaron incluidos al final del articulado.</p>{% for article in copy.version_articles %}<details class="article-review" {% if forloop.last %}open{% endif %}><summary>Artículo {{ article.label }}</summary><div class="source-text">{{ article.text|linebreaks }}</div></details>{% empty %}<p>No hay contenido extraído para esta versión.</p>{% endfor %}{% endif %}{% endif %}
+    </div>
+  </section>
+</div>
+{% if copy.control %}
+<form method="post" action="{{ copy.control.url }}" id="case-decision" class="copy-decision" data-unsaved="{{ form.errors|yesno:'true,false' }}">{% csrf_token %}{{ form.revision }}{{ form.check }}
+  {% if form.non_field_errors %}<div class="field-error" role="alert">{{ form.non_field_errors }}<a href="{{ copy.control.url }}">Recargar el control</a></div>{% endif %}
+  {% if form.check.errors or form.revision.errors %}<div class="field-error" role="alert">{{ form.check.errors }}{{ form.revision.errors }}</div>{% endif %}
+  <fieldset class="copy-status"><legend class="visually-hidden">Resultado del control</legend>{% for radio in form.status %}<label>{{ radio.tag }}<span>{{ radio.choice_label }}</span></label>{% endfor %}</fieldset>{% for error in form.status.errors %}<p class="field-error" role="alert">{{ error }}</p>{% endfor %}
+  <div class="copy-decision-details"><fieldset class="copy-issues"><legend>Problemas encontrados</legend>{% for checkbox in form.issues %}<label>{{ checkbox.tag }}<span>{{ checkbox.choice_label }}</span></label>{% endfor %}{% for error in form.issues.errors %}<p class="field-error" role="alert">{{ error }}</p>{% endfor %}</fieldset><div class="copy-notes"><label for="{{ form.notes.id_for_label }}">Observaciones <small>(opcionales si marcaste un problema)</small></label>{{ form.notes }}{% for error in form.notes.errors %}<p class="field-error" role="alert">{{ error }}</p>{% endfor %}</div></div>
+  <footer><div>{% if copy.previous_url %}<a class="button" href="{{ copy.previous_url }}">Volver al control anterior</a>{% endif %}<button class="button" type="submit">Guardar y permanecer aquí</button></div><button class="button primary" name="continue" value="1">{% if copy.step == 'identity' %}Guardar y continuar con Artículos{% elif copy.step == 'articles' %}Guardar y revisar siguiente{% else %}Guardar y continuar{% endif %}</button></footer>
+  <p class="audit">Control: {{ copy.control.label }} · Se registra como {{ user.username }} · {{ copy.checked_count }} de {{ copy.check_count }} completos.</p>
+</form>
+{% else %}<p class="copy-context-note">No se puede dar por correcto un articulado que no está disponible. Completá los otros controles y registrá lo que falta.</p><a class="button primary" href="{{ copy.next_url }}">Continuar con Anexos</a>{% endif %}
+{% endif %}
+{% if history %}<details class="copy-history"><summary>Historial de decisiones de esta norma</summary><ol class="decision-history">{% for event in history %}<li><strong>{{ event.username }}</strong> · {{ event.created_at|date:'d/m/Y H:i' }}<p>{{ event.notes }}</p></li>{% endfor %}</ol></details>{% endif %}

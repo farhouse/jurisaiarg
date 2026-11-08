@@ -47,3 +47,7 @@ CREATE TABLE IF NOT EXISTS norm_reviews (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(task_id,user_id)
 );
+
+-- Controles de copia por persona, con evidencia del control en el historial.
+ALTER TABLE norm_reviews ADD COLUMN IF NOT EXISTS checks JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE review_events ADD COLUMN IF NOT EXISTS details JSONB NOT NULL DEFAULT '{}';

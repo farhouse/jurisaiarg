@@ -12,8 +12,10 @@ from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.views.decorators.http import require_safe
 
-from .models import ArticleVersion, CrawlJob, CrawlRun, LegalChange, NormReview, ReviewEvent, ReviewTask
+from .models import CrawlJob, CrawlRun, LegalChange, NormReview, ReviewEvent, ReviewTask
+from . import copy_review
 
 
 def validator_required(view):
@@ -43,8 +45,28 @@ class DecisionForm(forms.Form):
 
     def clean(self):
         data = super().clean()
-        if data.get("status") == "rechazada" and not data.get("notes", "").strip():
+        if data.get("status") == "rechazada" and not data.get("notes", "").strip() and not data.get('issues'):
             self.add_error("notes", "Indicá qué está mal y qué habría que corregir.")
+        return data
+
+
+class CopyDecisionForm(DecisionForm):
+    check = forms.ChoiceField(widget=forms.HiddenInput)
+    issues = forms.MultipleChoiceField(choices=copy_review.ISSUES, required=False, widget=forms.CheckboxSelectMultiple)
+
+    def __init__(self, *args, control, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['check'].choices = [(control['key'], control['label'])]
+        self.fields['status'].choices = [('validada', 'Sí, coincide'), ('rechazada', 'Hay diferencias'), ('pendiente', 'No puedo comprobarlo')]
+        self.control = control
+
+    def clean(self):
+        data = super().clean()
+        if data.get('status') == 'validada':
+            if not self.control['source']:
+                self.add_error('status', 'Falta la fuente de este lote. Dejá pendiente este control hasta poder compararlo.')
+            if data.get('issues'):
+                self.add_error('issues', 'Marcaste problemas: elegí «Hay diferencias» o quitá esas marcas.')
         return data
 
 
@@ -181,10 +203,20 @@ def task_detail(request, pk):
         task.review_notes = own_vote.notes if own_vote else ""
         task.reviewed_by = own_vote.username if own_vote else None
         task.reviewed_at = own_vote.updated_at if own_vote else None
-    form = DecisionForm(initial={"status": task.review_status if task.review_status != "pendiente" else None, "notes": task.review_notes, "revision": (own_vote.revision if own_vote else 0) if task.kind == "indice" else task.revision})
+    initial = {"status": task.review_status if task.review_status != "pendiente" else None, "notes": task.review_notes, "revision": (own_vote.revision if own_vote else 0) if task.kind == "indice" else task.revision}
+    copy = copy_review.copy_context(task, own_vote, request, current['url']) if task.kind == 'indice' else None
+    control = copy['control'] if copy else None
+    guided_post = request.method == 'POST' and 'check' in request.POST
+    if copy and control and (request.method != 'POST' or guided_post):
+        form = CopyDecisionForm(request.POST if guided_post else None, control=control, initial={
+            **initial, 'check': control['key'], 'status': control['status'] if control['saved'] else None,
+            'notes': control['notes'], 'issues': control['issues']})
+    else:
+        form = DecisionForm(request.POST if request.method == 'POST' else None, initial=initial)
     code = 200
     if request.method == "POST":
-        form = DecisionForm(request.POST)
+        if guided_post and (not copy or not control):
+            raise Http404
         if form.is_valid():
             with transaction.atomic():
                 locked = ReviewTask.objects.select_for_update().get(pk=task.pk)
@@ -198,9 +230,28 @@ def task_detail(request, pk):
                     status = form.cleaned_data["status"]
                     notes = form.cleaned_data["notes"].strip()
                     previous = (vote.status if vote else "pendiente") if locked.kind == "indice" else locked.review_status
-                    ReviewEvent.objects.create(task=locked, username=request.user.get_username(), previous_status=previous, status=status, notes=notes, created_at=now)
+                    checks = dict(vote.checks) if vote else {}
+                    details = {}
+                    event_notes = notes
+                    if guided_post:
+                        issues = form.cleaned_data['issues']
+                        if not notes and issues:
+                            notes = ', '.join(dict(copy_review.ISSUES)[key] for key in issues)
+                        check_result = {'status': status, 'notes': notes, 'issues': issues,
+                                        'source_id': control['source'].pk if control['source'] else None,
+                                        'label': control['label'], 'updated_at': now.isoformat()}
+                        checks[control['key']] = check_result
+                        details = {'check': control['key'], **check_result}
+                        event_notes = control['label'] + ': ' + (notes or copy_review.STATUS_LABELS[status])
+                        status = copy_review.aggregate(copy['checks'], checks)
+                        notes = '\n'.join(c['label'] + ': ' + checks[c['key']]['notes'] for c in copy['checks']
+                                          if c['key'] in checks and checks[c['key']]['notes'])
+                    elif locked.kind == 'indice':
+                        # Una decisión global antigua reemplaza el desglose anterior, si existía.
+                        checks = {}
+                    ReviewEvent.objects.create(task=locked, username=request.user.get_username(), previous_status=previous, status=status, notes=event_notes, details=details, created_at=now)
                     if locked.kind == "indice":
-                        NormReview.objects.update_or_create(task=locked, user_id=request.user.pk, defaults={"username": request.user.get_username(), "status": status, "notes": notes, "revision": revision + 1, "updated_at": now})
+                        NormReview.objects.update_or_create(task=locked, user_id=request.user.pk, defaults={"username": request.user.get_username(), "status": status, "notes": notes, 'checks': checks, "revision": revision + 1, "updated_at": now})
                     else:
                         locked.review_status, locked.review_notes = status, notes
                         locked.reviewed_by = request.user.get_username() if status != "pendiente" else None
@@ -211,6 +262,8 @@ def task_detail(request, pk):
                             LegalChange.objects.filter(pk=locked.legal_change_id).update(review_status=status, review_notes=notes, reviewed_by=locked.reviewed_by, reviewed_at=locked.reviewed_at, updated_at=now)
             if code != 409:
                 messages.success(request, "Decisión guardada. Quedó registrada con tu usuario y fecha.")
+                if guided_post:
+                    return redirect(copy['next_url'] if request.POST.get('continue') else control['url'])
                 if request.POST.get('continue'):
                     _, updated_tabs = norm_sections(task, request.user)
                     order = [tab_key] + [key for key in tabs if key != tab_key]
@@ -222,14 +275,17 @@ def task_detail(request, pk):
                 return redirect(current['url'])
         elif code == 200:
             code = 400
-    articles = task.model_result.get('articles', [])
-    if task.kind == 'indice' and 'articles' not in task.model_result:
-        articles = [{'label': av.article.article_label, 'version': av.norm_version.version_type,
-                     'text': av.text_normalized} for av in ArticleVersion.objects.filter(
-                         article__norm=task.norm).select_related('article', 'norm_version').order_by('norm_version_id','article__ordinal')]
+    articles = copy_review.articles_for(task) if task.kind == 'indice' else []
     context.update(task=task, form=form, articles=articles,
-                   snapshot='articles' in task.model_result, history=task.events.order_by('-id')[:10])
+                   copy=copy, snapshot='articles' in task.model_result, history=task.events.order_by('-id')[:10])
     return render(request, 'review/task.html', context, status=code)
+
+
+@validator_required
+@require_safe
+def copy_source(request, pk, source_id):
+    task = get_object_or_404(ReviewTask, pk=pk, kind='indice')
+    return copy_review.source_response(task, source_id, request.GET.get('focus', ''))
 
 
 STATUS_LABELS = {
