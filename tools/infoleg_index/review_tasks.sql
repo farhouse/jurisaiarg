@@ -52,3 +52,14 @@ CREATE TABLE IF NOT EXISTS norm_reviews (
 ALTER TABLE norm_reviews ADD COLUMN IF NOT EXISTS checks JSONB NOT NULL DEFAULT '{}';
 ALTER TABLE review_events ADD COLUMN IF NOT EXISTS details JSONB NOT NULL DEFAULT '{}';
 ALTER TABLE review_tasks ADD COLUMN IF NOT EXISTS proposed_correction JSONB NOT NULL DEFAULT '{}';
+
+-- Avance privado por persona y norma/lote. Solo finalizar publica decisiones.
+CREATE TABLE IF NOT EXISTS review_drafts (
+  id BIGSERIAL PRIMARY KEY,
+  task_id BIGINT NOT NULL REFERENCES review_tasks(id),
+  user_id BIGINT NOT NULL,
+  data JSONB NOT NULL DEFAULT '{}',
+  revision INTEGER NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(task_id,user_id)
+);

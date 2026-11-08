@@ -15,8 +15,8 @@ from django.utils import timezone
 from django.views.decorators.http import require_safe
 
 from .forms import DecisionForm
-from .models import CrawlJob, CrawlRun, LegalChange, NormReview, ReviewEvent, ReviewTask
-from . import copy_review, passage_review
+from .models import CrawlJob, CrawlRun, LegalChange, NormReview, ReviewDraft, ReviewEvent, ReviewTask
+from . import copy_review, passage_review, draft_review
 
 
 def validator_required(view):
@@ -128,7 +128,7 @@ def norm_sections(entry, user):
     # Solo metadatos para navegar: el texto completo se carga al abrir cada caso.
     rows = list(ReviewTask.objects.filter(norm_id=entry.norm_id, crawl_run_id=entry.crawl_run_id)
                 .order_by('id').values('id', 'kind', 'model_result__category', 'review_status',
-                                      'article_version__article__article_label'))
+                                      'article_version__article__article_label', 'article_version__norm_version__version_type'))
     votes = dict(NormReview.objects.filter(task_id__in=[row['id'] for row in rows if row['kind'] == 'indice'],
                                           user_id=user.pk).values_list('task_id', 'status'))
     root_id = next((row['id'] for row in rows if row['kind'] == 'indice'), entry.pk)
@@ -141,7 +141,7 @@ def norm_sections(entry, user):
         status = votes.get(row['id'], 'pendiente') if key == 'copy' else row['review_status']
         tab = tabs[key]
         tab['cases'].append({'id': row['id'], 'status': status, 'status_label': labels[status],
-                             'article': row['article_version__article__article_label'],
+                             'article': row['article_version__article__article_label'], 'version': row['article_version__norm_version__version_type'],
                              'url': review_url(root_id, key, row['id'])})
         tab[{'validada': 'approved', 'rechazada': 'rejected', 'pendiente': 'pending'}[status]] += 1
     for tab in tabs.values():
@@ -150,10 +150,74 @@ def norm_sections(entry, user):
     return root_id, tabs
 
 
+def record_decision(locked, user, form, copy, passage, control, guided_post, proposal_post, vote, revision):
+    now = timezone.now()
+    status = form.cleaned_data["status"]
+    notes = form.cleaned_data["notes"].strip()
+    previous = (vote.status if vote else "pendiente") if locked.kind == "indice" else locked.review_status
+    checks = dict(vote.checks) if vote else {}
+    details = {}
+    event_notes = notes
+    if proposal_post:
+        proposed = {**form.correction, 'issues': form.cleaned_data['issues']}
+        details = {'proposal_kind': form.proposal_kind, 'original': form.original,
+                   'proposed': proposed, 'changes': form.changes,
+                   'sources': [{'id': v['source'].pk, 'norm_id': v['source'].norm_id,
+                                'run_id': v['source'].crawl_run_id, 'retrieved_at': v['source'].retrieved_at.isoformat()}
+                               for v in passage['viewers']]}
+        event_notes = notes or '; '.join(form.changes) or ', '.join(dict(form.fields['issues'].choices)[issue] for issue in form.cleaned_data['issues'])
+        if not notes:
+            notes = event_notes
+    if guided_post:
+        issues = form.cleaned_data['issues']
+        if not notes and issues:
+            notes = ', '.join(dict(copy_review.ISSUES)[key] for key in issues)
+        check_result = {'status': status, 'notes': notes, 'issues': issues,
+                        'source_id': control['source'].pk if control['source'] else None,
+                        'label': control['label'], 'updated_at': now.isoformat()}
+        checks[control['key']] = check_result
+        details = {'check': control['key'], **check_result}
+        event_notes = control['label'] + ': ' + (notes or copy_review.STATUS_LABELS[status])
+        status = copy_review.aggregate(copy['checks'], checks)
+        notes = '\n'.join(c['label'] + ': ' + checks[c['key']]['notes'] for c in copy['checks']
+                          if c['key'] in checks and checks[c['key']]['notes'])
+    elif locked.kind == 'indice':
+        # Una decisión global antigua reemplaza el desglose anterior, si existía.
+        checks = {}
+    ReviewEvent.objects.create(task=locked, username=user.get_username(), previous_status=previous, status=status, notes=event_notes, details=details, created_at=now)
+    if locked.kind == "indice":
+        NormReview.objects.update_or_create(task=locked, user_id=user.pk, defaults={"username": user.get_username(), "status": status, "notes": notes, 'checks': checks, "revision": revision + 1, "updated_at": now})
+    else:
+        if proposal_post:
+            locked.proposed_correction = proposed
+        locked.review_status, locked.review_notes = status, notes
+        locked.reviewed_by = user.get_username() if status != "pendiente" else None
+        locked.reviewed_at = now if status != "pendiente" else None
+        locked.revision += 1
+        locked.save(update_fields=["review_status", "review_notes", "reviewed_by", "reviewed_at", "revision", 'proposed_correction'])
+        if locked.legal_change_id:
+            LegalChange.objects.filter(pk=locked.legal_change_id).update(review_status=status, review_notes=notes, reviewed_by=locked.reviewed_by, reviewed_at=locked.reviewed_at, updated_at=now)
+
+
+def focus_tabs(tabs, entry, root_id, focus, version):
+    for tab in tabs.values():
+        tab['url'] = review_url(root_id, tab['key'])
+        tab['all_url'] = tab['url']
+        if focus:
+            tab['url'] += '&' + urlencode({'focus_article': focus, 'focus_version': version or ''})
+            if tab['key'] == 'copy':
+                index = next((i for i, a in enumerate(a for a in copy_review.articles_for(entry if entry.kind == 'indice' else ReviewTask.objects.get(pk=root_id)) if a['version'] == version) if a['label'] == focus), None)
+                if index is not None:
+                    tab['url'] += '&' + urlencode({'step': 'articles', 'article': index, 'version': version})
+
+
 @validator_required
 def task_detail(request, pk):
     entry = get_object_or_404(ReviewTask.objects.select_related('norm', 'crawl_run'), pk=pk)
     root_id, tabs = norm_sections(entry, request.user)
+    draft = ReviewDraft.objects.filter(task_id=root_id, user_id=request.user.pk).first()
+    if request.method == 'GET' and entry.pk == root_id and not request.GET and draft and draft.data.get('items') and draft.data.get('cursor'):
+        return redirect(reverse('review:task', args=[root_id]) + '?' + urlencode(draft.data['cursor']))
     default_tab = 'copy' if entry.kind == 'indice' else ('topics' if entry.model_result.get('category') == 'temas' else 'relations')
     tab_key = request.GET.get('tab', default_tab)
     if tab_key not in tabs:
@@ -169,14 +233,23 @@ def task_detail(request, pk):
         current = next((case for case in cases if case['id'] == selected_id), None)
         if current is None:
             raise Http404  # Nunca abrir ni modificar un caso de otra norma, lote o solapa.
+    elif request.GET.get('focus_article') and tab_key != 'copy':
+        current = next((case for case in cases if case['article'] == request.GET['focus_article']
+                        and (not request.GET.get('focus_version') or case['version'] == request.GET['focus_version'])), None)
     elif 'tab' not in request.GET:
         current = next(case for case in cases if case['id'] == entry.pk)
     else:
         current = next((case for case in cases if case['status'] == 'pendiente'), cases[0] if cases else None)
     job = CrawlJob.objects.filter(crawl_run_id=entry.crawl_run_id, mode__in=['full', 'process']).order_by('-id').first()
     context = {'norm': entry.norm, 'run': entry.crawl_run, 'root_id': root_id,
-               'tabs': tabs.values(), 'active_tab': active_tab, 'section_cases': cases, 'processing_job': job}
+               'tabs': tabs.values(), 'active_tab': active_tab, 'section_cases': cases, 'processing_job': job,
+               'draft_revision': draft.revision if draft else 0, 'draft_count': len(draft.data.get('items', {})) if draft else 0,
+               'finish_url': review_url(root_id, 'copy') + '&finish=1', 'focused_article': request.GET.get('focus_article', '')}
+    if request.GET.get('finish') == '1':
+        context.update(finish_summary=draft_review.summary(entry, root_id, request.user, draft), task=entry, confirmed=request.GET.get('confirmed') == '1' and bool(draft and 'finalized_revision' in draft.data and not draft.data.get('items')))
+        return render(request, 'review/task.html', context)
     if current is None:
+        focus_tabs(tabs, entry, root_id, request.GET.get('focus_article'), request.GET.get('focus_version'))
         if request.method == 'POST':
             raise Http404
         return render(request, 'review/task.html', context)
@@ -195,7 +268,11 @@ def task_detail(request, pk):
     initial = {"status": task.review_status if task.review_status != "pendiente" else None, "notes": task.review_notes, "revision": (own_vote.revision if own_vote else 0) if task.kind == "indice" else task.revision}
     copy = copy_review.copy_context(task, own_vote, request, current['url']) if task.kind == 'indice' else None
     passage = passage_review.passage_context(task, request, current['url']) if task.kind == 'pasaje' else None
+    draft_review.preview(copy, task, draft)
     control = copy['control'] if copy else None
+    focus = control['article']['label'] if control and control.get('article') else (task.article_version.article.article_label if task.article_version_id else request.GET.get('focus_article'))
+    version = copy['version'] if copy else (task.article_version.norm_version.version_type if task.article_version_id else request.GET.get('focus_version'))
+    focus_tabs(tabs, entry, root_id, focus, version)
     guided_post = request.method == 'POST' and 'check' in request.POST
     proposal_post = request.method == 'POST' and 'proposal_kind' in request.POST
     if copy and control and (request.method != 'POST' or guided_post):
@@ -206,6 +283,19 @@ def task_detail(request, pk):
         form = passage_review.proposal_form(task, request.POST if proposal_post else None, initial)
     else:
         form = DecisionForm(request.POST if request.method == 'POST' else None, initial=initial)
+    if request.method == 'POST' and request.POST.get('draft') == '1':
+        if not (guided_post and control or proposal_post and passage):
+            raise Http404
+        return draft_review.save(request, root_id, task, form, control, initial['revision'])
+    if request.method == 'GET':
+        draft_item = draft.data.get('items', {}).get(draft_review.key(task, control)) if draft else None
+        if draft_item and draft_item['fields'].get('revision') != [str(initial['revision'])]:
+            context.update(conflict_revision=initial['revision'], conflict_status=task.get_review_status_display(), conflict_notes=task.review_notes)
+        draft_review.overlay(form, draft_item)
+        if draft_item and request.GET.get('validate') == '1':
+            data = draft_review.fields_data(draft_item['fields'])
+            data['status'] = data.get('status') or 'pendiente'
+            form = CopyDecisionForm(data, control=control, initial=initial) if control else passage_review.proposal_form(task, data, initial)
     code = 200
     if request.method == "POST":
         if guided_post and (not copy or not control):
@@ -221,52 +311,7 @@ def task_detail(request, pk):
                     form.add_error(None, "Esta revisión cambió desde que abriste el formulario. Recargá el caso antes de continuar.")
                     code = 409
                 else:
-                    now = timezone.now()
-                    status = form.cleaned_data["status"]
-                    notes = form.cleaned_data["notes"].strip()
-                    previous = (vote.status if vote else "pendiente") if locked.kind == "indice" else locked.review_status
-                    checks = dict(vote.checks) if vote else {}
-                    details = {}
-                    event_notes = notes
-                    if proposal_post:
-                        proposed = {**form.correction, 'issues': form.cleaned_data['issues']}
-                        details = {'proposal_kind': form.proposal_kind, 'original': form.original,
-                                   'proposed': proposed, 'changes': form.changes,
-                                   'sources': [{'id': v['source'].pk, 'norm_id': v['source'].norm_id,
-                                                'run_id': v['source'].crawl_run_id, 'retrieved_at': v['source'].retrieved_at.isoformat()}
-                                               for v in passage['viewers']]}
-                        event_notes = notes or '; '.join(form.changes) or ', '.join(dict(form.fields['issues'].choices)[issue] for issue in form.cleaned_data['issues'])
-                        if not notes:
-                            notes = event_notes
-                    if guided_post:
-                        issues = form.cleaned_data['issues']
-                        if not notes and issues:
-                            notes = ', '.join(dict(copy_review.ISSUES)[key] for key in issues)
-                        check_result = {'status': status, 'notes': notes, 'issues': issues,
-                                        'source_id': control['source'].pk if control['source'] else None,
-                                        'label': control['label'], 'updated_at': now.isoformat()}
-                        checks[control['key']] = check_result
-                        details = {'check': control['key'], **check_result}
-                        event_notes = control['label'] + ': ' + (notes or copy_review.STATUS_LABELS[status])
-                        status = copy_review.aggregate(copy['checks'], checks)
-                        notes = '\n'.join(c['label'] + ': ' + checks[c['key']]['notes'] for c in copy['checks']
-                                          if c['key'] in checks and checks[c['key']]['notes'])
-                    elif locked.kind == 'indice':
-                        # Una decisión global antigua reemplaza el desglose anterior, si existía.
-                        checks = {}
-                    ReviewEvent.objects.create(task=locked, username=request.user.get_username(), previous_status=previous, status=status, notes=event_notes, details=details, created_at=now)
-                    if locked.kind == "indice":
-                        NormReview.objects.update_or_create(task=locked, user_id=request.user.pk, defaults={"username": request.user.get_username(), "status": status, "notes": notes, 'checks': checks, "revision": revision + 1, "updated_at": now})
-                    else:
-                        if proposal_post:
-                            locked.proposed_correction = proposed
-                        locked.review_status, locked.review_notes = status, notes
-                        locked.reviewed_by = request.user.get_username() if status != "pendiente" else None
-                        locked.reviewed_at = now if status != "pendiente" else None
-                        locked.revision += 1
-                        locked.save(update_fields=["review_status", "review_notes", "reviewed_by", "reviewed_at", "revision", 'proposed_correction'])
-                        if locked.legal_change_id:
-                            LegalChange.objects.filter(pk=locked.legal_change_id).update(review_status=status, review_notes=notes, reviewed_by=locked.reviewed_by, reviewed_at=locked.reviewed_at, updated_at=now)
+                    record_decision(locked, request.user, form, copy, passage, control, guided_post, proposal_post, vote, revision)
             if code != 409:
                 messages.success(request, "Decisión guardada. Quedó registrada con tu usuario y fecha.")
                 if guided_post:

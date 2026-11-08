@@ -5,7 +5,7 @@
 {% if not copy.snapshot %}<p class="copy-context-note">Este caso antiguo no guardó el texto extraído al crearse. Se muestra el archivo local disponible; la fuente corresponde al lote indicado.</p>{% endif %}
 {% if copy.step == 'summary' %}
 <section class="copy-summary" aria-labelledby="copy-summary-heading">
-  <header><h2 id="copy-summary-heading">Resumen de tu revisión</h2><p>{{ copy.checked_count }} de {{ copy.check_count }} controles completos · Resultado de la copia: <span class="badge {{ task.review_status }}">{{ task.get_review_status_display }}</span></p></header>
+  <header><h2 id="copy-summary-heading">Resumen de tu revisión</h2><p>{{ copy.checked_count }} de {{ copy.check_count }} controles con decisión · Resultado confirmado de la copia: <span class="badge {{ task.review_status }}">{{ task.get_review_status_display }}</span></p></header>
   <p>La copia queda correcta cuando todos los controles son correctos. Un error confirmado queda registrado aunque todavía falten otros controles.</p>
   <ul class="copy-check-list">{% for check in copy.checks %}<li><div><strong>{{ check.label }}</strong>{% if check.notes %}<p>{{ check.notes }}</p>{% endif %}</div><span class="badge {{ check.status }}">{{ check.status_label }}</span><a href="{{ check.url }}">Revisar<span class="visually-hidden"> {{ check.label }}</span></a></li>{% endfor %}</ul>
   <p>Esta revisión comprueba la copia. Las materias, los tags y las relaciones se revisan en sus solapas.</p>
@@ -18,8 +18,8 @@
 </header>
 {% if copy.step != 'identity' %}<form method="get" action="{% url 'review:task' root_id %}" class="copy-navigation">
   <input type="hidden" name="tab" value="copy"><input type="hidden" name="case" value="{{ task.pk }}"><input type="hidden" name="step" value="{{ copy.step }}">
-  <label for="copy-version">Versión <select id="copy-version" name="version">{% for version in copy.versions %}<option value="{{ version.key }}" {% if version.key == copy.version %}selected{% endif %}>{{ version.label }}</option>{% endfor %}</select></label><button class="button">Ver versión</button>
-  {% if copy.control %}<a href="{{ copy.previous_url|default:copy.summary_url }}">Anterior</a><a href="{{ copy.next_url }}">{% if copy.step == 'articles' %}Siguiente artículo o paso{% else %}Ir al resumen{% endif %}</a>{% endif %}
+  <label for="copy-version">Versión <select id="copy-version" name="version">{% for version in copy.versions %}<option value="{{ version.key }}" {% if version.key == copy.version %}selected{% endif %}>{{ version.label }}</option>{% endfor %}</select></label><button class="button manual-save">Ver selección</button>
+  {% if copy.step == 'articles' %}<label for="copy-article">Artículo <select id="copy-article" name="article" data-navigate-select>{% for check in copy.checks %}{% if check.step == 'articles' and check.version == copy.version %}<option value="{{ check.index }}" data-url="{{ check.url }}" {% if check.key == copy.control.key %}selected{% endif %}>{{ check.label }} · {{ check.status_label }}</option>{% endif %}{% endfor %}</select></label>{% endif %}
 </form>{% endif %}
 <div class="copy-comparison">
   <section class="copy-document" aria-labelledby="source-heading">
@@ -41,13 +41,13 @@
   </section>
 </div>
 {% if copy.control %}
-<form method="post" action="{{ copy.control.url }}" id="case-decision" class="copy-decision" data-unsaved="{{ form.errors|yesno:'true,false' }}">{% csrf_token %}{{ form.revision }}{{ form.check }}
+<form method="post" action="{{ copy.control.url }}" id="case-decision" class="copy-decision" data-unsaved="{{ form.errors|yesno:'true,false' }}">{% csrf_token %}{{ form.revision }}{{ form.check }}<input type="hidden" name="draft" value="1"><input type="hidden" name="draft_revision" value="{{ draft_revision }}">
   {% if form.non_field_errors %}<div class="field-error" role="alert">{{ form.non_field_errors }}<a href="{{ copy.control.url }}">Recargar el control</a></div>{% endif %}
   {% if form.check.errors or form.revision.errors %}<div class="field-error" role="alert">{{ form.check.errors }}{{ form.revision.errors }}</div>{% endif %}
-  <fieldset class="copy-status"><legend class="visually-hidden">Resultado del control</legend>{% for radio in form.status %}<label>{{ radio.tag }}<span>{{ radio.choice_label }}</span></label>{% endfor %}</fieldset>{% for error in form.status.errors %}<p class="field-error" role="alert">{{ error }}</p>{% endfor %}
-  <div class="copy-decision-details"><fieldset class="copy-issues"><legend>Problemas encontrados</legend>{% for checkbox in form.issues %}<label>{{ checkbox.tag }}<span>{{ checkbox.choice_label }}</span></label>{% endfor %}{% for error in form.issues.errors %}<p class="field-error" role="alert">{{ error }}</p>{% endfor %}</fieldset><div class="copy-notes"><label for="{{ form.notes.id_for_label }}">Observaciones <small>(opcionales si marcaste un problema)</small></label>{{ form.notes }}{% for error in form.notes.errors %}<p class="field-error" role="alert">{{ error }}</p>{% endfor %}</div></div>
-  <footer><div>{% if copy.previous_url %}<a class="button" href="{{ copy.previous_url }}">Volver al control anterior</a>{% endif %}<button class="button" type="submit">Guardar y permanecer aquí</button></div><button class="button primary" name="continue" value="1">{% if copy.step == 'identity' %}Guardar y continuar con Artículos{% elif copy.step == 'articles' %}Guardar y revisar siguiente{% else %}Guardar y continuar{% endif %}</button></footer>
-  <p class="audit">Control: {{ copy.control.label }} · Se registra como {{ user.username }} · {{ copy.checked_count }} de {{ copy.check_count }} completos.</p>
+
+  <details class="review-details"><summary>Problemas y observaciones</summary><div class="copy-decision-details"><fieldset class="copy-issues"><legend>Problemas encontrados</legend>{% for checkbox in form.issues %}<label>{{ checkbox.tag }}<span>{{ checkbox.choice_label }}</span></label>{% endfor %}{% for error in form.issues.errors %}<p class="field-error" role="alert">{{ error }}</p>{% endfor %}</fieldset><div class="copy-notes"><label for="{{ form.notes.id_for_label }}">Observaciones <small>(opcionales si marcaste un problema)</small></label>{{ form.notes }}{% for error in form.notes.errors %}<p class="field-error" role="alert">{{ error }}</p>{% endfor %}</div></div>
+  </details><footer class="review-actions">  <fieldset class="copy-status"><legend class="visually-hidden">Resultado del control</legend>{% for radio in form.status %}<label>{{ radio.tag }}<span>{{ radio.choice_label }}</span></label>{% endfor %}</fieldset>{% for error in form.status.errors %}<p class="field-error" role="alert">{{ error }}</p>{% endfor %}<div class="review-action-navigation"><div>{% if copy.previous_url %}<a class="button" href="{{ copy.previous_url }}">Anterior</a>{% endif %}<button class="button manual-save" type="submit">Guardar avance</button></div><a class="button primary" href="{{ copy.next_url }}">{% if copy.step == 'identity' %}Continuar con Artículos{% elif copy.step == 'articles' %}Siguiente{% else %}Ver resumen de la copia{% endif %}</a></div></footer>
+  <p class="audit">Control: {{ copy.control.label }} · Borrador privado de {{ user.username }} · {{ copy.checked_count }} de {{ copy.check_count }} con decisión. La revisión se registra al finalizar la norma.</p>
 </form>
 {% else %}<p class="copy-context-note">No se puede dar por correcto un articulado que no está disponible. Completá los otros controles y registrá lo que falta.</p><a class="button primary" href="{{ copy.next_url }}">Continuar con Anexos</a>{% endif %}
 {% endif %}

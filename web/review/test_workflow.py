@@ -3,11 +3,11 @@ from django.db import connection
 from django.test import Client, TransactionTestCase
 from django.utils import timezone
 
-from .models import Article, ArticleVersion, CrawlItem, CrawlJob, CrawlRun, LegalChange, Norm, NormReview, NormSource, NormVersion, ReviewEvent, ReviewTask
+from .models import Article, ArticleVersion, CrawlItem, CrawlJob, CrawlRun, LegalChange, Norm, NormReview, ReviewDraft, NormSource, NormVersion, ReviewEvent, ReviewTask
 
 
 class WorkflowTest(TransactionTestCase):
-    tables = [Norm, CrawlRun, NormSource, NormVersion, Article, ArticleVersion, LegalChange, CrawlItem, ReviewTask, ReviewEvent, NormReview, CrawlJob]
+    tables = [Norm, CrawlRun, NormSource, NormVersion, Article, ArticleVersion, LegalChange, CrawlItem, ReviewTask, ReviewEvent, NormReview, ReviewDraft, CrawlJob]
 
     @classmethod
     def setUpClass(cls):
@@ -473,3 +473,105 @@ class WorkflowTest(TransactionTestCase):
         self.assertEqual(none.review_status, 'validada')
         self.assertEqual(none.proposed_correction['amending_reference'], '')
         self.assertEqual(self.client.get(url + '?section=invalid').status_code, 404)
+
+    def test_zzzzzz_private_drafts_finalize_atomically_and_resume(self):
+        user = User.objects.create_user('draft-owner', is_staff=True)
+        other = User.objects.create_user('draft-other', is_staff=True)
+        now = timezone.now()
+        run = CrawlRun.objects.create(requested_ids=[99101], started_at=now, status='ok', processed_count=1)
+        norm = Norm.objects.create(infoleg_id=99101, norm_type='Ley', number='101', general_status='desconocida', index_status='solo_texto_original', article_count=2)
+        task = ReviewTask.objects.create(crawl_run=run, norm=norm, kind='indice', source_text='Ficha', decision='revision', fingerprint='draft-index', created_at=now,
+            model_result={'articles': [{'label': str(i), 'version': 'original', 'text': f'Artículo {i}. Texto.'} for i in (1, 2)]})
+        for kind in ('ficha', 'texto_original'):
+            NormSource.objects.create(norm=norm, crawl_run=run, url=norm.infoleg_url, document_kind=kind, retrieved_at=now, http_status=200, raw_content='<p>Artículo 1. Texto.</p><p>Artículo 2. Texto.</p>')
+        self.client.force_login(user)
+        url = f'/validar/{task.pk}/'
+        checks = self.client.get(url).context['copy']['checks']
+        self.assertEqual(self.client.post(checks[0]['url'], {'draft':1,'draft_revision':0,'check':checks[0]['key'],'revision':0,'status':['validada','inventada']}, HTTP_X_REVIEW_ASYNC='1').status_code, 400)
+        revision = 0
+        for check in checks[:2]:
+            response = self.client.post(check['url'], {'draft': 1, 'draft_revision': revision, 'check': check['key'], 'revision': 0, 'status': 'validada'}, HTTP_X_REVIEW_ASYNC='1')
+            self.assertEqual(response.status_code, 200)
+            revision = response.json()['revision']
+        self.assertFalse(NormReview.objects.filter(task=task).exists())
+        self.assertFalse(ReviewEvent.objects.filter(task=task).exists())
+        self.assertEqual(self.client.get(url).status_code, 302)  # Resume the last edited control.
+        resumed = self.client.get(checks[1]['url'])
+        self.assertEqual(resumed.context['form'].initial['status'], 'validada')
+        self.assertEqual(resumed.context['copy']['checked_count'], 2)
+        summary = self.client.get(url + '?tab=copy&finish=1')
+        self.assertEqual((summary.context['finish_summary']['done'], summary.context['finish_summary']['pending']), (2, 2))
+        self.client.force_login(other)
+        self.assertEqual(self.client.get(checks[1]['url']).context['copy']['checked_count'], 0)
+        self.assertEqual(self.client.post(url + 'finalizar/', {'draft_revision': revision}).status_code, 409)
+        self.client.force_login(user)
+        self.assertEqual(self.client.post(checks[1]['url'], {'draft': 1, 'draft_revision': 0, 'check': checks[1]['key'], 'revision': 0, 'status': 'validada'}, HTTP_X_REVIEW_ASYNC='1').status_code, 409)
+        self.assertEqual(self.client.post(url + 'finalizar/', {'draft_revision': revision}).status_code, 302)
+        vote = NormReview.objects.get(task=task, user_id=user.pk)
+        self.assertEqual(vote.status, 'pendiente')  # Unread articles are never approved.
+        self.assertEqual(len(vote.checks), 2)
+        self.assertEqual(ReviewEvent.objects.filter(task=task).count(), 2)
+        self.assertEqual(self.client.post(url + 'finalizar/', {'draft_revision': revision}).status_code, 302)  # Safe retry.
+        self.assertEqual(ReviewEvent.objects.filter(task=task).count(), 2)
+        draft = ReviewDraft.objects.get(task=task, user_id=user.pk)
+        for check in checks[2:]:
+            response = self.client.post(check['url'], {'draft': 1, 'draft_revision': draft.revision, 'check': check['key'], 'revision': vote.revision, 'status': 'validada'}, HTTP_X_REVIEW_ASYNC='1')
+            self.assertEqual(response.status_code, 200)
+            draft.refresh_from_db()
+        self.assertEqual(self.client.post(url + 'finalizar/', {'draft_revision': draft.revision}).status_code, 302)
+        vote.refresh_from_db()
+        self.assertEqual(vote.status, 'validada')
+        protected = Client(enforce_csrf_checks=True)
+        protected.force_login(user)
+        self.assertEqual(protected.post(url + 'finalizar/', {'draft_revision': draft.revision}).status_code, 403)
+        self.assertEqual(protected.post(checks[0]['url'], {'draft': 1}).status_code, 403)
+
+    def test_zzzzzzz_draft_corrections_conflicts_and_article_context(self):
+        user = User.objects.create_user('draft-proposals', is_staff=True)
+        now = timezone.now()
+        run = CrawlRun.objects.create(requested_ids=[99201], started_at=now, status='ok', processed_count=1)
+        norm = Norm.objects.create(infoleg_id=99201, norm_type='Ley', number='201', general_status='desconocida', index_status='solo_texto_original', article_count=1)
+        source = NormSource.objects.create(norm=norm, crawl_run=run, url=norm.infoleg_url, document_kind='texto_original', retrieved_at=now, http_status=200, raw_content='<p>Artículo 1. Texto.</p>')
+        version = NormVersion.objects.create(norm=norm, source=source, version_type='original', is_current=True)
+        article = Article.objects.create(norm=norm, article_key='1', article_label='1', ordinal=1)
+        av = ArticleVersion.objects.create(article=article, norm_version=version, text_original='Texto', text_normalized='Texto', status='desconocido')
+        index = ReviewTask.objects.create(crawl_run=run, norm=norm, kind='indice', source_text='Ficha', decision='revision', fingerprint='draft-context-index', created_at=now, model_result={'articles':[{'label':'1','version':'original','text':'Texto'}]})
+        topic = ReviewTask.objects.create(crawl_run=run, norm=norm, article_version=av, kind='pasaje', source_text='Texto', decision='revision', fingerprint='draft-context-topic', created_at=now, model_result={'category':'temas','matters':[{'label':'Civil','score':.9}],'concepts':['Contrato']})
+        self.client.force_login(user)
+        url = f'/validar/{index.pk}/?tab=topics&case={topic.pk}'
+        check = self.client.get(f'/validar/{index.pk}/?tab=copy&step=articles').context['copy']['control']
+        self.assertEqual(self.client.post(check['url'], {'draft':1,'draft_revision':0,'check':check['key'],'revision':0,'status':'validada'}, HTTP_X_REVIEW_ASYNC='1').status_code, 200)
+        payload = {'draft':1,'draft_revision':1,'proposal_kind':'topics','revision':0,'status':'validada','keep_matters':['Civil'],'keep_concepts':['Contrato'],'add_concepts':'Dominio'}
+        self.assertEqual(self.client.post(url, payload, HTTP_X_REVIEW_ASYNC='1').status_code, 200)
+        topic.refresh_from_db()
+        self.assertEqual((topic.review_status, topic.proposed_correction), ('pendiente', {}))
+        self.assertEqual(self.client.get(url).context['form'].initial['add_concepts'], 'Dominio')
+        final = f'/validar/{index.pk}/finalizar/'
+        self.assertEqual(self.client.post(final, {'draft_revision':2}, HTTP_X_REVIEW_ASYNC='1').status_code, 400)
+        self.assertFalse(ReviewEvent.objects.filter(task__in=[topic,index]).exists())
+        self.assertFalse(NormReview.objects.filter(task=index).exists())
+        # Incomplete corrections can be saved, then completed without a full-page post.
+        payload.update(draft_revision=2,status='rechazada')
+        self.assertEqual(self.client.post(url, payload, HTTP_X_REVIEW_ASYNC='1').status_code, 200)
+        ReviewTask.objects.filter(pk=topic.pk).update(revision=1)
+        self.assertEqual(self.client.post(final, {'draft_revision':3}, HTTP_X_REVIEW_ASYNC='1').status_code, 409)
+        self.assertTrue(ReviewDraft.objects.get(task=index, user_id=user.pk).data['items'])
+        self.assertFalse(ReviewEvent.objects.filter(task__in=[topic,index]).exists())
+        self.assertFalse(NormReview.objects.filter(task=index).exists())
+        # Carry the selected article and its version between tabs, including entering via a passage.
+        page = self.client.get(f'/validar/{topic.pk}/')
+        copy_tab = next(tab for tab in page.context['tabs'] if tab['key'] == 'copy')
+        self.assertIn('article=0', copy_tab['url'])
+        focused = self.client.get(f'/validar/{index.pk}/?tab=topics&focus_article=1&focus_version=original')
+        self.assertEqual(focused.context['task'].pk, topic.pk)
+        missing = self.client.get(f'/validar/{index.pk}/?tab=topics&focus_article=99&focus_version=original')
+        self.assertContains(missing, 'Sin casos para el artículo 99')
+        self.assertContains(page, 'Conservar mi borrador sobre la revisión actual')
+        # Resolving the concurrent revision preserves the proposed correction and original classification.
+        payload.update(draft_revision=3,revision=1)
+        self.assertEqual(self.client.post(url, payload, HTTP_X_REVIEW_ASYNC='1').status_code, 200)
+        self.assertEqual(self.client.post(final, {'draft_revision':4}).status_code, 302)
+        topic.refresh_from_db()
+        self.assertEqual(topic.review_status, 'rechazada')
+        self.assertEqual(topic.proposed_correction['concepts'], ['Contrato','Dominio'])
+        self.assertEqual(topic.model_result['concepts'], ['Contrato'])

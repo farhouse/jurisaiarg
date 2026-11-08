@@ -1,0 +1,27 @@
+<div class="review-session" data-draft-revision="{{ draft_revision }}" data-draft-count="{{ draft_count }}"><div><strong>Tu avance</strong><span data-save-state role="status" aria-live="polite">{% if draft_count %}Borrador guardado · {{ draft_count }} controles con cambios{% else %}Sin cambios nuevos{% endif %}</span><button type="button" class="button" data-retry-save hidden>Reintentar guardado</button></div><a class="button" href="{{ finish_url }}">Resumen y finalizar</a></div>
+<nav class="norm-review-tabs" aria-label="Secciones de revisión de esta norma">
+  {% for tab in tabs %}<a href="{{ tab.url }}" {% if tab.key == active_tab.key %}aria-current="page"{% endif %}><strong>{{ tab.label }}</strong><span>{% if tab.total %}{{ tab.reviewed }} de {{ tab.total }} {% if tab.key == 'copy' %}revisados por vos{% else %}revisados{% endif %}{% else %}Sin casos preparados{% endif %}</span></a>{% endfor %}
+</nav>
+{% if processing_job.active %}<p class="notice">El procesamiento de este lote está {{ processing_job.get_status_display|lower }}. Los casos disponibles pueden aumentar; estos contadores todavía son parciales.</p>{% endif %}
+<section class="norm-review-section" aria-label="{{ active_tab.label }}">
+{% if finish_summary %}{% include 'review/finish_summary.html' %}{% elif task %}
+{% if conflict_revision != None %}<aside class="review-conflict notice" role="alert"><strong>Este caso cambió mientras lo revisabas.</strong><p>Último resultado confirmado: {{ conflict_status }}. {{ conflict_notes }}</p>{% if passage.changes %}<p>Correcciones confirmadas: {{ passage.changes|join:'; ' }}</p>{% endif %}<p>Tu borrador se conserva abajo. Compará los cambios antes de continuar.</p><button class="button" type="button" data-rebase="{{ conflict_revision }}">Conservar mi borrador sobre la revisión actual</button></aside>{% endif %}
+{% if task.kind == 'indice' %}
+{% include 'review/copy_task.html' %}
+{% else %}
+{% include 'review/passage_task.html' %}
+{% endif %}
+
+{% else %}
+<section class="panel">
+  {% if focused_article %}<h3>Sin casos para el artículo {{ focused_article }}</h3><p>Esta sección no tiene casos preparados para ese artículo y versión.</p><a class="button" href="{% url 'review:task' root_id %}?tab={{ active_tab.key }}">Ver todos los casos de esta sección</a>{% elif active_tab.key == 'copy' %}<h3>Copia pendiente de preparar</h3><p>Este lote todavía no tiene un control de copia para esta norma.</p>
+  {% elif processing_job.active %}<h3>Esperando resultados del procesamiento</h3><p>Aún no hay casos de {{ active_tab.label|lower }} disponibles para esta norma. Volvé a consultar cuando avance el lote.</p>
+  {% elif processing_job.status == 'failed' %}<h3>Procesamiento interrumpido</h3><p>El último procesamiento del lote no terminó y no hay casos de esta sección preparados para esta norma.</p>
+  {% elif processing_job.status == 'done' or processing_job.status == 'partial' %}<h3>Sin casos generados</h3><p>El procesamiento terminó, pero no dejó casos de esta sección para esta norma. Hace falta comprobar el contenido disponible y su procesamiento.</p>
+  {% else %}<h3>Pendiente de procesamiento</h3><p>No hay casos de {{ active_tab.label|lower }} preparados para esta norma en este lote.</p>{% endif %}
+  <p>La ausencia de casos no equivale a una validación ni demuestra que no haya temas o relaciones que revisar.</p>
+  {% if user.is_staff %}<a class="button" href="{% url 'review:crawl_jobs' %}">Ir a procesar un lote descargado</a>{% else %}<p>Pedile a un administrador que compruebe el procesamiento de este lote.</p>{% endif %}
+  <a class="button" href="{{ active_tab.url }}">Actualizar esta sección</a>
+</section>
+{% endif %}
+</section>

@@ -20,7 +20,7 @@
       <ol>
         <li>Entrá a <strong>Validar</strong> y elegí el lote asignado.</li>
         <li>En <strong>Mostrar</strong>, elegí «Pendientes de revisión». Para comenzar por las descargas, elegí «Calidad del índice» en <strong>Trabajo</strong> y pulsá «Aplicar».</li>
-        <li>Abrí un caso con «Revisar». Compará «Abrir fuente oficial en InfoLEG» con «Ver archivo local completo».</li>
+        <li>Abrí una norma con «Revisar». La fuente descargada de InfoLEG y la extracción de JurisAI aparecen juntas en el comparador.</li>
       </ol>
       <p>Hay dos tareas distintas: <strong>calidad del índice</strong> revisa la descarga de una norma; <strong>interpretación del texto</strong> revisa un pasaje. Aprobar el índice no aprueba sus pasajes.</p>
       <p>En los índices, cada persona deja su propia decisión. Una norma puede aparecer en tu cola aunque otra persona ya la haya revisado. Cambiar tu resultado no borra los resultados ajenos ni suma un segundo voto.</p>
@@ -39,14 +39,14 @@
     <section id="textos">
       <h2>Qué comprobar en un texto</h2>
       <ol>
-        <li><strong>Leé el pasaje y su contexto.</strong> Desplegá «Leer el artículo completo y su contexto». Si está dividido, no decidas solo por el fragmento.</li>
+        <li><strong>Leé el pasaje y su contexto.</strong> Usá «Artículo completo» o la fuente de respaldo. Si está dividido, no decidas solo por el fragmento.</li>
         <li><strong>Contrastá la interpretación.</strong> ¿El texto realmente dice lo que indica la evaluación: sustitución, derogación, incorporación u otra categoría? Una mención o una propuesta no demuestra que ese cambio se haya producido.</li>
         <li><strong>Verificá la relación del parser, si aparece.</strong> Comprobá norma modificadora, artículo que modifica, artículo afectado y alcance. Distinguir el artículo completo de un inciso o párrafo es parte de la revisión.</li>
         <li><strong>Consultá la fuente.</strong> Usá la norma modificadora enlazada cuando esté disponible. Si falta una referencia necesaria o el alcance no se puede resolver, registrá la duda.</li>
       </ol>
       <p>Un resultado puede acertar la categoría y equivocarse en la norma o el alcance. En ese caso no está completamente correcto. Esta revisión tampoco acredita por sí sola la vigencia actual de una norma.</p>
     </section>
-    <section id="temas"><h2>Revisar materias y conceptos</h2><p>Los casos temáticos muestran el fragmento, materias propuestas por Laya y conceptos encontrados por vocabulario. Comprobá que describen el contenido central: una mención aislada puede sobrar, y el catálogo puede omitir un tema importante.</p><p>Desmarcá las etiquetas que sobran y usá «Proponer agregar» para las que faltan. Elegí «Necesita corrección» y guardá la revisión; el sistema conserva la propuesta original y tu corrección por separado. Si necesitás más contexto, leé el artículo completo o dejá pendiente. Las materias pueden ser múltiples y no asignan competencia judicial. Todas las propuestas temáticas de este piloto requieren revisión, incluso con puntaje alto.</p><p>La búsqueda por significado compara el texto con tu consulta mediante un modelo local. Los validadores revisan el contenido y las etiquetas; no tienen que validar los vectores numéricos.</p></section>
+    <section id="temas"><h2>Revisar materias y conceptos</h2><p>Los casos temáticos muestran el fragmento, materias propuestas por Laya y conceptos encontrados por vocabulario. Comprobá que describen el contenido central: una mención aislada puede sobrar, y el catálogo puede omitir un tema importante.</p><p>Desmarcá las etiquetas que sobran y usá «Proponer agregar» para las que faltan. Elegí «Necesita corrección»; el borrador se guarda automáticamente y se confirma al finalizar la norma; el sistema conserva la propuesta original y tu corrección por separado. Si necesitás más contexto, leé el artículo completo o dejá pendiente. Las materias pueden ser múltiples y no asignan competencia judicial. Todas las propuestas temáticas de este piloto requieren revisión, incluso con puntaje alto.</p><p>La búsqueda por significado compara el texto con tu consulta mediante un modelo local. Los validadores revisan el contenido y las etiquetas; no tienen que validar los vectores numéricos.</p></section>
     <section id="decision">
       <h2>Cuándo elegir cada decisión</h2>
       <dl class="guide-decisions">
@@ -72,18 +72,19 @@
       <h2>Qué significa la evaluación automática</h2>
       <p>El sistema combina el parser con Laya. Un puntaje inferior a <strong>0,75</strong> envía el pasaje a revisión. También se revisan desacuerdos, referencias sin resolver, alcances parciales y textos divididos o truncados, aunque el puntaje sea alto.</p>
       <p>El puntaje es una señal del modelo; <strong>0,75 no garantiza un 75 % de acierto</strong>. «Sin cambio detectado» tampoco prueba que no exista un cambio.</p>
-      <p>Los resultados automáticos se consultan con «Auditar automáticos» y se revisan con los mismos criterios. No se cuentan como validaciones humanas hasta que una persona guarda una decisión.</p>
+      <p>Los resultados automáticos se consultan con «Auditar automáticos» y se revisan con los mismos criterios. No se cuentan como validaciones humanas hasta que una persona confirma una decisión al finalizar la revisión.</p>
     </section>
     <section id="guardar">
       <h2>Guardar, continuar y retomar</h2>
       <ul>
-        <li>En <strong>Copia de la norma</strong>, seguí los pasos Identidad, Artículos, Anexos y Resumen. La fuente descargada de InfoLEG aparece junto a la extracción. Guardá cada control con «Sí, coincide», «Hay diferencias» o «No puedo comprobarlo»; podés volver a cualquier control y retomar lo guardado.</li>
-        <li>Una copia queda correcta cuando todos sus controles son correctos. Una diferencia confirmada la marca incorrecta; los controles sin resolver siguen visibles en el resumen. Si no hay fuente disponible, dejá pendiente el control.</li>
-        <li>Dentro de cada norma, las solapas <strong>Copia de la norma</strong>, <strong>Materias y tags</strong> y <strong>Relaciones</strong> reúnen los casos del mismo lote. Cada sección muestra su avance y conserva sus decisiones.</li>
-        <li>En Materias y tags y Relaciones, <strong>Guardar revisión y continuar / Guardar revisión y ver siguiente</strong> registra la decisión y abre otro caso pendiente de esa norma: primero en la misma solapa y después en las demás. Si no hay otro preparado, permanecés en el caso actual.</li>
-        <li><strong>Guardar y permanecer aquí</strong> registra la decisión sin cambiar de caso. Usá «Volver a la mesa de revisión» para elegir otra norma.</li>
-        <li><strong>Mis decisiones</strong> permite consultar tus casos resueltos. Podés cambiar una decisión o reabrirla con «Dejar pendiente»; el historial se conserva.</li>
-        <li>Si tu revisión de un índice cambió desde otra pestaña, la aplicación te pedirá recargarla. Otra persona puede votar sobre el mismo índice sin reemplazar tu decisión. En los pasajes, el control de cambios sigue siendo compartido.</li>
+        <li>En <strong>Copia de la norma</strong>, seguí Identidad, Artículos, Anexos y Resumen. Usá <strong>Anterior</strong>, <strong>Siguiente</strong> o el selector de artículo: cambia el contenido del comparador sin recargar la página.</li>
+        <li>Marcá <strong>Sí, coincide</strong>, <strong>Hay diferencias</strong> o <strong>No puedo comprobarlo</strong>. Los problemas y observaciones se despliegan cuando hacen falta. Abrir un artículo o pasar al siguiente no lo aprueba.</li>
+        <li>El avance se guarda como <strong>borrador privado</strong>. Esperá el mensaje «Guardado» antes de cerrar. Si falla la conexión, las ediciones siguen en la pestaña: usá <strong>Reintentar guardado</strong>. El navegador también intenta recuperar el avance al recargar esa misma pestaña.</li>
+        <li>Las solapas <strong>Copia de la norma</strong>, <strong>Materias y tags</strong> y <strong>Relaciones</strong> conservan el artículo y la versión seleccionados. Si no hay un caso preparado para ese artículo, la pantalla lo indica; eso no equivale a una validación.</li>
+        <li>En <strong>Resumen y finalizar</strong>, comprobá las decisiones, diferencias y controles pendientes. <strong>Finalizar revisión de esta norma</strong> registra todo lo trabajado con tu usuario y fecha. El borrador todavía no suma votos ni revisiones al administrador.</li>
+        <li>Podés finalizar dejando controles pendientes y continuar después. La copia solo queda correcta si todos sus controles son correctos; una diferencia confirmada la marca incorrecta. Si falta la fuente, dejá pendiente.</li>
+        <li>Si otra pestaña o persona cambió una revisión compartida, se conserva tu borrador y se pide comparar el resultado actualizado. La confirmación no sobrescribe cambios ajenos automáticamente.</li>
+        <li>Sin JavaScript, usá <strong>Guardar avance</strong> y luego el resumen para finalizar. Las decisiones confirmadas conservan su historial y se pueden volver a revisar.</li>
       </ul>
       <p>El administrador ve cada norma y cuántas personas la marcaron correcta, incorrecta o pendiente. Puede abrirla para consultar quién decidió, cuándo y qué observó. Se cuenta una decisión vigente por persona y norma dentro de cada lote; los pasajes se muestran por separado. Un pendiente guardado cuenta como pendiente, mientras que no haber revisado todavía no suma ningún voto.</p>
       <a class="button primary" href="{% url 'review:queue' %}">Empezar a revisar</a>

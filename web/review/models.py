@@ -298,6 +298,19 @@ class NormReview(models.Model):
         constraints = [models.UniqueConstraint(fields=["task", "user_id"], name="norm_reviews_task_user_unique")]
 
 
+class ReviewDraft(models.Model):
+    task = models.ForeignKey(ReviewTask, models.DO_NOTHING)
+    user_id = models.BigIntegerField()
+    data = models.JSONField(default=dict)
+    revision = models.IntegerField(default=0)
+    updated_at = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = 'review_drafts'
+        constraints = [models.UniqueConstraint(fields=['task', 'user_id'], name='review_drafts_task_user_unique')]
+
+
 class ReviewEvent(models.Model):
     task = models.ForeignKey(ReviewTask, models.DO_NOTHING, related_name="events")
     username = models.TextField()

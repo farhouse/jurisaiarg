@@ -102,9 +102,9 @@ class ProposalForm(DecisionForm):
 
 class TopicsForm(ProposalForm):
     keep_matters = forms.MultipleChoiceField(required=False, widget=forms.CheckboxSelectMultiple)
-    add_matters = TagsField(required=False, max_length=2000)
+    add_matters = TagsField(required=False, max_length=2000, label='Materias para agregar')
     keep_concepts = forms.MultipleChoiceField(required=False, widget=forms.CheckboxSelectMultiple)
-    add_concepts = TagsField(required=False, max_length=2000)
+    add_concepts = TagsField(required=False, max_length=2000, label='Conceptos para agregar')
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

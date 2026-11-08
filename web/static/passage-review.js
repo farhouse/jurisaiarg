@@ -1,4 +1,4 @@
-(() => {
+function enhancePassageReview() {
   const form = document.getElementById('case-decision');
   if (!form || !form.dataset.proposalKind) return;
   const original = JSON.parse(document.getElementById('passage-original').textContent);
@@ -36,16 +36,21 @@
     };
     add.addEventListener('click', commit);
     input.addEventListener('keydown', event => { if (event.key === 'Enter') {event.preventDefault(); commit();} });
-    editors.push(commit); render();
+    editors.push({commit, input, field, render}); render();
   }
-  form.addEventListener('submit', () => editors.forEach(commit => commit()));
+  form.addEventListener('submit', () => editors.forEach(editor => editor.commit()));
+  form.addEventListener('review:serialize', event => editors.forEach(({field, input}) => {
+    event.detail.set(field.name, splitTags(field.value + '\n' + input.value).join('\n'));
+  }));
+  form.addEventListener('review:restored', () => {editors.forEach(editor => editor.render()); updateChanges();});
   const changesList = form.querySelector('[data-change-summary]');
   const updateChanges = () => {
     const changes = [];
     if (original.kind === 'topics') {
       for (const [key, label] of [['matters', 'materia'], ['concepts', 'concepto']]) {
         const kept = [...form.querySelectorAll(`input[name="keep_${key}"]:checked`)].map(e => e.value);
-        const added = splitTags(form.elements.namedItem('add_' + key)?.value || '');
+        const editor = editors.find(editor => editor.field.name === 'add_' + key);
+        const added = splitTags((editor?.field.value || '') + '\n' + (editor?.input.value || ''));
         const proposed = [...kept, ...added];
         changes.push(...original[key].filter(t => !proposed.includes(t)).map(t => `Quitar ${label}: ${t}`));
         changes.push(...added.filter(t => !original[key].includes(t)).map(t => `Agregar ${label}: ${t}`));
@@ -77,4 +82,5 @@
       link.setAttribute('aria-current', 'step');
     });
   }
-})();
+}
+document.addEventListener("review:mounted", enhancePassageReview);

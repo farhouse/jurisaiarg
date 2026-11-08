@@ -65,7 +65,10 @@ class WorkerIntegrationTest(unittest.TestCase):
             self.assertEqual(con.execute("SELECT column_default FROM information_schema.columns WHERE table_name='review_tasks' AND column_name='proposed_correction'").fetchone()[0], "'{}'::jsonb")
             task = con.execute('SELECT id FROM review_tasks WHERE crawl_run_id=%s ORDER BY id LIMIT 1', (run_id,)).fetchone()[0]
             con.execute("INSERT INTO norm_reviews(task_id,user_id,username,status,notes) VALUES (%s,1,'test','validada','evidencia')", (task,))
+            con.execute("INSERT INTO review_drafts(task_id,user_id,data,revision) VALUES (%s,1,'{\"items\":{}}',3)", (task,))
             con.commit()
+            worker.initialize(dsn)
+            self.assertEqual(con.execute('SELECT revision FROM review_drafts WHERE task_id=%s', (task,)).fetchone()[0], 3)
             # Fallo en clasificación: retomar el mismo lote sin acceder a la red.
             process_id = con.execute("INSERT INTO crawl_jobs(submission_id,start_id,end_id,requested_by,mode,crawl_run_id) VALUES (%s,201,202,'test','process',%s) RETURNING id", (uuid.uuid4(), run_id)).fetchone()[0]
             con.commit()

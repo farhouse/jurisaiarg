@@ -1,0 +1,8 @@
+<section class="copy-summary" aria-labelledby="finish-heading">
+<header><h2 id="finish-heading">Resumen de la norma</h2><p>{{ finish_summary.done }} de {{ finish_summary.total }} controles con decisión · {{ finish_summary.differences }} con diferencias · {{ finish_summary.pending }} pendientes.</p></header>
+{% if confirmed %}<p class="notice" role="status">Revisión registrada. Los controles sin comprobar siguen pendientes.</p>{% endif %}
+<p>El borrador guarda tu avance. Finalizar registra las decisiones con tu usuario y fecha. Los controles que no revisaste conservan su estado; abrir un artículo no lo aprueba.</p>
+{% if processing_job.active %}<p class="notice">El procesamiento sigue activo. Pueden aparecer nuevos casos pendientes después de esta revisión.</p>{% endif %}
+<ul class="copy-check-list">{% for row in finish_summary.rows %}<li><div><strong>{{ row.label }}</strong><p>{{ row.section }}{% if row.draft %} · Cambio en tu borrador{% endif %}</p></div><span class="badge {{ row.status }}">{{ row.status_label }}</span><a href="{{ row.url }}">Revisar</a></li>{% empty %}<li>No hay controles preparados.</li>{% endfor %}</ul>
+<form method="post" action="{% url 'review:finalize' root_id %}" data-finalize>{% csrf_token %}<input type="hidden" name="draft_revision" value="{{ draft_revision }}"><div class="field-error" data-finalize-error role="alert" hidden></div><footer class="copy-summary-actions"><button class="button primary" {% if not draft_count %}disabled{% endif %}>Finalizar revisión de esta norma</button><a class="button" href="{% url 'review:queue' %}?run={{ run.pk }}">Salir y continuar más tarde</a></footer></form>
+</section>

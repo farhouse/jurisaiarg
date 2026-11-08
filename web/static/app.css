@@ -339,3 +339,32 @@ tbody th { font-weight:650; }.table-empty { padding:30px 12px; color:var(--muted
 .passage-form .errorlist { color:var(--red); padding-left:20px; font-size:13px; }
 @media(max-width:900px) { .tag-entry { flex-wrap:wrap; }.tag-entry input { flex-basis:100%; } }
 @media(max-width:650px) { .passage-case-nav { width:100%; }.relation-identities,.relation-fields { grid-template-columns:minmax(0,1fr); }.scope-detail { grid-column:auto; }.passage-proposal-body { padding:16px; }.original-proposal dl { grid-template-columns:minmax(0,1fr); }.original-proposal dd { margin-bottom:8px; } }
+
+/* Revisión continua: el comparador permanece en pantalla y el avance es privado. */
+.review-session { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px 24px; margin:14px 0; padding:12px 16px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+.review-session > div { display:flex; align-items:center; flex-wrap:wrap; gap:8px 16px; }
+.review-session [data-save-state] { font-size:13px; color:var(--muted); max-width:70ch; }
+.review-session:has([data-retry-save]:not([hidden])) [data-save-state] { color:var(--red); }
+.review-session [data-retry-save] { font-size:13px; }
+.review-enhanced .manual-save { display:none; }
+.review-details { margin:16px 0; }
+.review-details > summary { cursor:pointer; font-size:14px; font-weight:650; padding:8px 0; }
+.review-details .copy-decision-details { margin:12px 0; }
+.copy-decision .review-actions { position:sticky; bottom:0; display:grid; gap:12px; background:var(--paper); z-index:2; padding-block:12px; }
+.review-action-navigation { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; }
+.review-action-navigation > div { display:flex; gap:12px; }
+#review-workspace [hidden] { display:none !important; }
+.review-enhanced .copy-navigation #copy-article { max-width:32rem; }
+#review-workspace[aria-busy="true"] .norm-review-section { opacity:.65; cursor:progress; }
+#review-workspace h2:focus { outline:0; }
+#review-workspace select { font-variant-numeric:tabular-nums; }
+.copy-summary-actions button:disabled { opacity:.6; cursor:not-allowed; }
+@media(max-width:650px) {
+  .review-session { padding:12px; align-items:start; }
+  .review-session > div { flex-basis:100%; }
+  .copy-navigation label { min-width:0; width:100%; }
+  .copy-navigation #copy-article { width:100%; }
+  .review-actions { gap:10px; }
+  .copy-decision .review-actions { position:static; }
+  .review-action-navigation > div,.review-action-navigation > a { flex:1; text-align:center; }
+}

@@ -89,6 +89,29 @@ La aceptación automática se mantiene separada de `validada`: se puede auditar,
 pero nunca se cuenta como revisión humana. El panel Django de relaciones es de
 solo lectura; las decisiones se guardan desde la mesa de revisión.
 
+## Revisión continua
+
+El comparador navega entre controles y solapas con `fetch` y el historial del
+navegador, conservando la página. El selector y los enlaces siguen funcionando
+con navegación normal cuando JavaScript no está disponible.
+
+`review_drafts` conserva un borrador privado por usuario y tarea raíz (norma y
+lote), con revisión numérica para detectar ediciones desde otras pestañas. El
+avance no modifica `norm_reviews`, `legal_changes` ni los contadores de decisiones.
+El autoguardado indica cuándo el servidor confirmó la escritura. Ante un fallo,
+se mantiene el formulario y se intenta recuperar el avance desde `sessionStorage`
+en la misma pestaña; si esa copia corresponde a otra versión, se pide elegir
+cuál conservar. Sin JavaScript existe «Guardar avance».
+
+«Resumen y finalizar» confirma las decisiones en una transacción: valida todos
+los formularios y sus revisiones antes de escribir un voto o evento. Los controles
+sin decisión siguen pendientes. La confirmación admite reintentos sin duplicar
+el historial y conserva los votos previos de otras personas. Los pasajes siguen
+usando la decisión compartida existente y avisan si cambió durante el trabajo.
+
+Al desplegar, volver a ejecutar `init` para crear `review_drafts` mediante el SQL
+idempotente. No se requiere reprocesar descargas ni cambiar los datos existentes.
+
 ## Preparar un lote para revisión
 
 En un volumen existente, aplicar al actualizar el esquema (es idempotente):
