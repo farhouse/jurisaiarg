@@ -122,14 +122,18 @@ def norm_detail(request, pk):
             article.display_version = next((v for v in versions if v.norm_version.is_current), versions[0])
             articles.append(article)
     with connection.cursor() as cursor:
-        cursor.execute('''SELECT rt.id FROM review_tasks rt JOIN search_chunks sc
+        cursor.execute('''SELECT rt.id FROM review_tasks rt LEFT JOIN search_chunks sc
           ON sc.id::text=rt.model_result->>'source_chunk_id'
           LEFT JOIN article_versions av ON av.id=sc.article_version_id
-          WHERE rt.norm_id=%s AND rt.model_result->>'category'='temas'
-          AND rt.model_result->>'source_hash'=md5(sc.content)
+          WHERE rt.norm_id=%s AND rt.model_result->>'category'='temas' AND NOT rt.superseded
+          AND ((rt.model_result->>'scope'='norma' AND rt.model_result->>'norm_version_id'=(
+            SELECT nv.id::text FROM norm_versions nv WHERE nv.norm_id=rt.norm_id
+            ORDER BY (nv.version_type='actualizada') DESC,nv.id DESC LIMIT 1))
+          OR (rt.model_result->>'source_hash'=md5(sc.content)
           AND (av.id IS NULL OR av.norm_version_id=(SELECT nv.id FROM norm_versions nv WHERE nv.norm_id=sc.norm_id ORDER BY (nv.version_type='actualizada') DESC,nv.id DESC LIMIT 1))
+          ))
           AND rt.crawl_run_id=(SELECT max(t.crawl_run_id) FROM review_tasks t
-            WHERE t.norm_id=rt.norm_id AND t.model_result->>'category'='temas')
+            WHERE t.norm_id=rt.norm_id AND t.model_result->>'category'='temas' AND NOT t.superseded)
           ORDER BY rt.id''', [pk])
         ids = [row[0] for row in cursor.fetchall()]
     topics = list(ReviewTask.objects.filter(pk__in=ids).exclude(review_status='rechazada').order_by('id'))

@@ -17,7 +17,7 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
 
-PARSER_VERSION = "infoleg-html-v1"
+PARSER_VERSION = "infoleg-html-v2"
 BASE_URL = "https://servicios.infoleg.gob.ar/infolegInternet/"
 
 MONTHS = {
@@ -138,23 +138,22 @@ def parse_articles(html: str) -> tuple[str, list[dict[str, str | int]]]:
     # Los textos actualizados suelen anexar una sección histórica que vuelve a
     # mencionar muchos artículos. Se conserva en la fuente cruda, pero no debe
     # confundirse con el articulado vigente.
-    antecedents = re.search(r">\s*Antecedentes\s+Normativos\s*<", html, re.IGNORECASE)
-    if antecedents:
-        html = html[:antecedents.start()]
     soup = BeautifulSoup(html, "html.parser")
-    for node in soup(["script", "style", "header", "footer"]):
+    for node in soup(["head", "script", "style", "template"]):
         node.decompose()
-    raw_text = soup.get_text("\n")
+    raw_text = (soup.body or soup).get_text("\n")
     lines = [normalize_ws(line) for line in raw_text.splitlines()]
     full_text = "\n".join(line for line in lines if line)
-    matches = list(ARTICLE_MARKER.finditer(full_text))
+    history = re.search(r"(?im)^\s*Antecedentes\s+Normativos\s*$", full_text)
+    operative_text = full_text[:history.start()] if history else full_text
+    matches = list(ARTICLE_MARKER.finditer(operative_text))
     articles: list[dict[str, str | int]] = []
     by_key: dict[str, dict[str, str | int]] = {}
     for position, match in enumerate(matches):
-        end = matches[position + 1].start() if position + 1 < len(matches) else len(full_text)
+        end = matches[position + 1].start() if position + 1 < len(matches) else len(operative_text)
         label = normalize_text(match.group(1)).lower().replace(".", "")
         label = normalize_ws(label)
-        body = normalize_text(full_text[match.start():end])
+        body = normalize_text(operative_text[match.start():end])
         key = re.sub(r"\s+", "_", label)
         if key in by_key:
             # Algunas páginas repiten el rótulo dentro del mismo bloque (p.ej.

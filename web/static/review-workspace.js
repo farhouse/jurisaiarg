@@ -105,7 +105,7 @@
       if (await save()) rebase.closest('.review-conflict').remove();
     };
     for (const select of workspace.querySelectorAll('[data-navigate-select]')) select.onchange = () => navigate(select.selectedOptions[0].dataset.url || select.value);
-    for (const select of workspace.querySelectorAll('.copy-navigation select[name=version], .review-case-picker select')) {
+    for (const select of workspace.querySelectorAll('.copy-navigation select[name=version], .review-case-picker select, [data-dossier-version]')) {
       select.onchange = () => {
         const url = new URL(select.form.action);
         url.search = new URLSearchParams(new FormData(select.form));

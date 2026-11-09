@@ -89,58 +89,40 @@ La aceptación automática se mantiene separada de `validada`: se puede auditar,
 pero nunca se cuenta como revisión humana. El panel Django de relaciones es de
 solo lectura; las decisiones se guardan desde la mesa de revisión.
 
-## Revisión continua
+## Ficha y revisión por excepciones
 
-El comparador navega entre controles y solapas con `fetch` y el historial del
-navegador, conservando la página. El selector y los enlaces siguen funcionando
-con navegación normal cuando JavaScript no está disponible.
+`/validar/<id>/` abre una ficha por norma. Muestra el texto completo de la versión,
+la comprobación automática, una propuesta temática con contexto y las relaciones
+entrantes/salientes de toda la base. Los casos internos no se convierten en aprobaciones
+obligatorias por cada artículo. La cola agrupa las dudas por norma.
 
-`review_drafts` conserva un borrador privado por usuario y tarea raíz (norma y
-lote), con revisión numérica para detectar ediciones desde otras pestañas. El
-avance no modifica `norm_reviews`, `legal_changes` ni los contadores de decisiones.
-El autoguardado indica cuándo el servidor confirmó la escritura. Ante un fallo,
-se mantiene el formulario y se intenta recuperar el avance desde `sessionStorage`
-en la misma pestaña; si esa copia corresponde a otra versión, se pide elegir
-cuál conservar. Sin JavaScript existe «Guardar avance».
+`document-integrity-v2` compara texto visible de la fuente guardada con la extracción,
+tolerando espacios; comprueba orden y contenido del articulado. Una aprobación humana
+usa una clave con versión y hashes de fuente, extracción y artículos. Puede reutilizarse
+para el mismo contenido en otro lote, pero nunca para texto cambiado. Una comprobación
+automática no se almacena como voto humano. Las aprobaciones antiguas de identidad o
+partes se conservan con su alcance original.
 
-«Resumen y finalizar» confirma las decisiones en una transacción: valida todos
-los formularios y sus revisiones antes de escribir un voto o evento. Los controles
-sin decisión siguen pendientes. La confirmación admite reintentos sin duplicar
-el historial y conserva los votos previos de otras personas. Los pasajes siguen
-usando la decisión compartida existente y avisan si cambió durante el trabajo.
+`review_drafts` guarda avance privado por usuario y raíz, con protección por revisión,
+recuperación en la pestaña y confirmación transaccional en «Resumen y finalizar».
+Los resultados automáticos no trabajados no se exigen en el resumen. Las correcciones
+se guardan separadas del modelo y no reemplazan el texto ni entrenan al clasificador.
 
-Al desplegar, volver a ejecutar `init` para crear `review_drafts` mediante el SQL
-idempotente. No se requiere reprocesar descargas ni cambiar los datos existentes.
+`norm_references` conserva la dirección, evidencia, versión, artículo y resolución de
+una cita o efecto explícito. Las referencias sin destino esperan nuevas descargas.
+Los vínculos posteriores no modifican la aprobación del texto anterior. Los enlaces
+generales de InfoLEG no se presentan como modificaciones de artículo comprobadas.
 
-## Preparar un lote para revisión
+Al actualizar, ejecutar **init con la imagen nueva** antes de recrear web/crawler.
+El SQL es idempotente. El inicio consolida la cola antigua sin borrar votos, eventos
+ni borradores; archiva el progreso que tenía alcance por artículo o identidad.
+Para aplicar la extracción y clasificación nuevas al lote ya descargado, elegir
+**Procesar un lote descargado** en Gestión. No vuelve a acceder a InfoLEG; conserva
+versiones anteriores y el historial documental cuando cambia la extracción.
 
-En un volumen existente, aplicar al actualizar el esquema (es idempotente):
-
-```bash
-docker compose exec -T db psql -v ON_ERROR_STOP=1 -U juris_ai -d juris_ai \
-  < review_tasks.sql
-```
-
-Ejecutar ese comando desde `tools/infoleg_index/`. Luego extraer los cambios de
-los IDs del lote con `extract_legal_changes.py` y ejecutar:
-
-```bash
-HF_HUB_OFFLINE=1 .venv-laya/bin/python prepare_review.py \
-  --dsn 'postgresql://juris_ai:juris_ai_local@localhost:55432/juris_ai' --run-id 2
-docker compose restart web
-```
-
-El entorno Laya se instala con `requirements-laya.txt` y los pesos deben estar
-descargados antes de usar modo offline. Se procesa una versión por norma:
-actualizada si existe, o la última original disponible. Las notas editoriales
-se clasifican por separado y el resto del artículo también se inspecciona.
-Los textos largos se dividen con solapamiento y quedan para revisión de contexto.
-La cola conserva referencia al artículo completo.
-
-El proceso prepara un control por índice solicitado y tareas por pasaje. Usa
-huellas para reanudar sin duplicar tareas ni borrar revisiones humanas. Los
-errores de Laya generan tareas de revisión. `review_prepared_at` permite
-distinguir una cola completa de un proceso en curso.
+Las materias automáticas necesitan control de calidad; una propuesta por vocabulario
+se identifica como tal y carece de probabilidad. Un puntaje de Laya no garantiza acierto.
+Las fuentes incompletas o PDF no procesados requieren completar el procesamiento.
 
 ## Verificación
 

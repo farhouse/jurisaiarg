@@ -16,7 +16,7 @@ from legal_parser import PARSER_VERSION, extract_legal_changes
 
 
 MODEL_REVISION = "7b928d828b7b0e022f929d9bd2e44165aa270148"
-TRIAGE_VERSION = "parser-laya-v1"
+TRIAGE_VERSION = "parser-laya-v2"
 
 QUESTIONS = {
     "change_type": {

@@ -368,3 +368,31 @@ tbody th { font-weight:650; }.table-empty { padding:30px 12px; color:var(--muted
   .copy-decision .review-actions { position:static; }
   .review-action-navigation > div,.review-action-navigation > a { flex:1; text-align:center; }
 }
+
+/* Una ficha por norma: evidencia, propuesta y excepciones en el mismo contexto. */
+.dossier-heading { display:flex; align-items:center; justify-content:space-between; gap:20px; margin:20px 0; }
+.dossier-heading h2 { margin:0; font:700 28px/1.2 ui-serif,Georgia,serif; }
+.dossier-heading p { margin:6px 0 0; color:var(--muted); }
+.dossier-navigation { display:flex; flex-wrap:wrap; align-items:center; gap:20px; margin:18px 0; }
+.dossier-navigation a { font-weight:700; }.dossier-navigation span { color:var(--muted); font-size:13px; }
+.dossier-state { margin:20px 0; padding:14px 18px; border:1px solid var(--line); border-radius:8px; background:var(--green-soft); color:var(--green); }
+.dossier-layout { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(320px,.85fr); gap:32px; align-items:start; margin:24px 0 36px; }
+.dossier-text-body { padding:22px 26px; max-height:640px; overflow:auto; }
+.dossier-source { display:flex; flex-wrap:wrap; gap:12px 20px; border-top:1px solid var(--line); padding:14px 20px; font-size:13px; }
+.dossier-proposal { min-width:0; }.dossier-proposal > h3,.dossier-relations h3 { font:700 24px/1.3 ui-serif,Georgia,serif; margin:0 0 16px; }
+.dossier-proposal section { padding:16px 0; border-bottom:1px solid var(--line); }
+.dossier-proposal h4 { margin:0 0 10px; font-size:16px; }.dossier-proposal p { margin:8px 0; font-size:14px; }
+.dossier-proposal > details { margin:20px 0; }.dossier-proposal summary { cursor:pointer; font-weight:650; }
+.dossier-ok { color:var(--green); font-weight:700; }.dossier-alert { color:var(--red); font-weight:700; }
+.dossier-issues { margin:20px 0; padding:20px; border:1px solid #dbc693; border-radius:8px; background:#fffaf0; }
+.dossier-issues h3 { margin:0 0 12px; }.dossier-issues ul,.dossier-relations ul { list-style:none; padding:0; margin:0; }
+.dossier-issues li { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:12px 0; }
+.dossier-issues p { margin:6px 0; overflow-wrap:anywhere; }.dossier-issues .button { flex-shrink:0; }
+.dossier-relations { padding-top:28px; border-top:1px solid var(--line); }
+.dossier-relations > p { color:var(--muted); max-width:80ch; }
+.dossier-relations li { padding:18px 0; border-bottom:1px solid var(--line); }
+.dossier-relations strong,.dossier-relations span,.dossier-relations small { display:block; margin-bottom:6px; }
+.dossier-relations small { color:var(--muted); }.dossier-relations details { margin-top:8px; }.dossier-relations summary { cursor:pointer; }
+.article-contexts { padding-left:20px; font-size:14px; }.article-contexts li { margin-bottom:12px; }
+.copy-decision .review-actions { justify-content:stretch; grid-template-columns:minmax(0,1fr); }
+@media(max-width:850px) { .dossier-layout { grid-template-columns:minmax(0,1fr); gap:24px; }.dossier-heading { align-items:start; flex-direction:column; }.dossier-issues li { align-items:start; flex-direction:column; }.dossier-text-body { padding:18px; max-height:540px; } }

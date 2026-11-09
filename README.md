@@ -190,26 +190,42 @@ el fragmento que motivó cada resultado; no garantiza relevancia jurídica o vig
 Solo usa embeddings del contenido y modelo vigentes en el índice local. La versión
 preferida es la última actualizada disponible, o la última original si falta aquella.
 
-**Validación:** la copia de la norma, las relaciones jurídicas y las propuestas
-sobre materias/conceptos son casos separados. Las materias son multietiqueta y
-no representan el fuero competente. El catálogo inicial está en
-`tools/infoleg_index/topics.py`: materias propuestas por Laya y conceptos detectados
-por vocabulario. Todas las propuestas temáticas requieren revisión durante el
-piloto; las relaciones conservan la regla de 0,75 más desacuerdos y faltantes.
-Un rechazo registra la corrección sugerida en observaciones; no reescribe el texto
-ni entrena automáticamente el modelo. El buscador vectoriza el texto, no estas
-etiquetas. Las normas muestran etiquetas con acceso a la evidencia y estado humano.
+**Validación por norma:** una ficha reúne la copia completa, la propuesta temática
+con contexto y las relaciones de toda la base. La copia se compara automáticamente
+con el HTML guardado mediante un lector independiente y controles del articulado;
+solo las diferencias concretas necesitan cotejo humano. Una aprobación humana cubre
+esa versión completa, incluidos artículos y anexos, y se identifica por su contenido.
+No se vuelve a aprobar por cada artículo ni por la llegada de una relación nueva.
 
-**Límites del piloto:** no hay resúmenes generativos, clasificación judicial de
-competencia, ajuste automático con votos, ni garantía de que el catálogo cubra
-cada tema. Si se vuelve a descargar una norma antes de procesar un lote antiguo,
-se procesa el contenido local más reciente; las copias de casos ya preparados
-se conservan. Los casos antiguos sin copia guardada lo indican al mostrar el texto
-local actual. La comparación semántica es exacta en PostgreSQL; evaluar HNSW cuando
-crezca el volumen. Calibrar las materias con ejemplos revisados antes de automatizar
-su aprobación: la muestra inicial tuvo omisiones y dudas.
+Las materias y conceptos son propuestas, con procedencia explícita. Una predicción
+ambigua, de baja confianza, truncada o excesivamente amplia produce una duda temática
+por norma. Las sugerencias por vocabulario no reciben una probabilidad inventada.
+Las materias no asignan fuero competente. Los conceptos provienen de vocabulario y
+los embeddings se calculan sobre el texto; las etiquetas no reemplazan la búsqueda
+por significado. Laya necesita evaluación con ejemplos revisados: su puntaje no
+es una probabilidad calibrada de acierto jurídico.
 
-**Comprobación local:** 13 pruebas Django y 18 del crawler. En una prueba con
+`norm_references` registra citas y efectos explícitos, evidencia, versión y dirección.
+La falta de una norma destino queda esperando vinculación automática, sin tarea humana
+por esa sola causa. Cada lote vuelve a resolver referencias pendientes en toda la base.
+Las relaciones entrantes posteriores aparecen en la ficha anterior sin modificar votos.
+Los enlaces generales de InfoLEG se muestran aparte del efecto específico de un artículo.
+
+**Actualizar un volumen existente:** descargar las imágenes nuevas, ejecutar `init` y
+recrear `web` y `crawler`. En Gestión → Descargar y procesar, elegir **Procesar un lote
+descargado**. Relee el HTML guardado con el parser nuevo, clasifica con contexto y
+reutiliza los embeddings compatibles; no vuelve a descargar InfoLEG. El inicio migra
+la cola antigua conservando tareas, votos, eventos y borradores. Una aprobación antigua
+de identidad o artículo no se convierte en aprobación del documento completo.
+
+**Límites:** no se garantiza vigencia, competencia judicial ni exhaustividad del catálogo.
+No hay resumen generativo ni entrenamiento automático con los votos. Una fuente ausente
+o PDF sin extracción queda pendiente de procesamiento. Las propuestas rechazadas y sus
+correcciones se conservan separadas de la evidencia original.
+
+**Verificación de la ficha:** 23 pruebas Django y 19 del crawler sobre bases descartables; comparador, borrador, confirmación y escritorio/móvil comprobados en Chrome. La inferencia real de Laya sobre la Ley 23.600 produjo materias demasiado amplias: se retienen para auditoría y la ficha propone Administrativo por vocabulario, con revisión temática única.
+
+**Comprobación anterior:** 13 pruebas Django y 18 del crawler. En una prueba con
 los artículos 1 de InfoLEG 1 y 2, en CPU dentro de Docker, el proceso completo tardó
 84,69 s (incluyendo la primera descarga/carga de E5) y el máximo de los subprocesos
 fue 1.817,8 MiB. Una consulta semántica en frío tardó 10,57 s con 728 MiB de pico,

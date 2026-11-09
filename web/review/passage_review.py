@@ -12,7 +12,7 @@ from .forms import DecisionForm
 
 
 CHANGES = [('sustituye', 'Sustitución'), ('incorpora', 'Incorporación'), ('deroga', 'Derogación'),
-           ('modifica', 'Modificación'), ('ninguno', 'Sin cambio detectado'), ('ambiguo', 'Sin determinar')]
+           ('modifica', 'Modificación'), ('cita','Cita o remisión'), ('ninguno', 'Sin cambio detectado'), ('ambiguo', 'Sin determinar')]
 SCOPES = [('articulo', 'Artículo completo'), ('inciso', 'Inciso'), ('parrafo', 'Párrafo'),
           ('anexo', 'Anexo'), ('norma', 'Norma completa'), ('indeterminado', 'Sin determinar'),
           ('no_aplica', 'Sin relación detectada')]
@@ -25,6 +25,12 @@ def original_proposal(task):
     if task.model_result.get('category') == 'temas':
         return {'kind': 'topics', 'matters': [m['label'] for m in task.model_result.get('matters', [])],
                 'concepts': list(task.model_result.get('concepts', []))}
+    if task.reference_id:
+        ref=task.reference
+        return {'kind':'relations','amending_reference':ref.source_norm.display_reference,
+                'amending_article':ref.source_article_version.article.article_label if ref.source_article_version_id else '',
+                'affected_reference':ref.target_reference,'affected_article':ref.target_article,
+                'change_type':ref.relation_type,'scope':ref.scope,'scope_detail':ref.scope_detail}
     change = task.legal_change
     if change:
         return {'kind': 'relations', 'amending_reference': change.amending_norm.display_reference if change.amending_norm_id else change.amending_reference_raw,
@@ -195,7 +201,7 @@ def passage_context(task, request, current_url):
         raise Http404
     steps = [{'key': key, 'label': label, 'url': '#passage-' + key,
               'active': key == selected_step, 'complete': task.review_status != 'pendiente'} for key, label in labels]
-    version = task.article_version.norm_version.version_type if task.article_version_id else None
+    version = task.article_version.norm_version.version_type if task.article_version_id else task.model_result.get('version')
     sources = list(copy_review.available_sources(task).defer('raw_content').order_by('id'))
     primary = [s for s in sources if s.norm_id == task.norm_id]
     kind = 'texto_original' if version == 'original' else 'texto_actualizado' if version else 'ficha'
@@ -222,6 +228,16 @@ def passage_context(task, request, current_url):
                 'article': focus, 'version_label': 'Ficha oficial' if counterpart.document_kind == 'ficha' else 'Texto original' if counterpart.document_kind == 'texto_original' else 'Texto actualizado',
                 'url': reverse('review:copy_source', args=[task.pk, counterpart.pk]) + '?' + urlencode({'focus': focus}) + '#jurisai-focus',
                 'official_url': copy_review.safe_official_url(counterpart.url), 'same_batch': counterpart.crawl_run_id == task.crawl_run_id})
+    if not topics and task.reference_id and task.reference.target_norm_id:
+        related=[s for s in sources if s.norm_id==task.reference.target_norm_id and s.norm_id!=task.norm_id]
+        counterpart=next((s for s in reversed(related) if s.document_kind=='texto_original'),next(iter(reversed(related)),None))
+        if counterpart:
+            focus=task.reference.target_article
+            viewers.append({'key':'counterpart','label':'Norma referida','source':counterpart,
+                'reference':task.reference.target_reference,'article':focus,
+                'version_label':'Texto original' if counterpart.document_kind=='texto_original' else 'Texto actualizado' if counterpart.document_kind=='texto_actualizado' else 'Ficha oficial',
+                'url':reverse('review:copy_source',args=[task.pk,counterpart.pk])+'?'+urlencode({'focus':focus})+'#jurisai-focus',
+                'official_url':copy_review.safe_official_url(counterpart.url),'same_batch':counterpart.crawl_run_id==task.crawl_run_id})
     terms = original['concepts'] if topics else [original['amending_reference'], original['affected_reference'], original['scope_detail']]
     return {'topics': topics, 'original': original, 'steps': steps, 'viewers': viewers,
             'has_counterpart': any(v['key'] == 'counterpart' for v in viewers),

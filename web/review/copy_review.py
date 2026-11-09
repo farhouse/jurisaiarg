@@ -10,7 +10,8 @@ from django.http import Http404, HttpResponse
 from django.db.models import Q
 from django.urls import reverse
 
-from .models import ArticleVersion, NormSource, NormVersion
+from .models import ArticleVersion, NormSource, NormVersion, NormReview
+from .text_integrity import POLICY
 
 
 ISSUES = [('identity', 'Identidad incorrecta'), ('missing_text', 'Falta texto'),
@@ -41,6 +42,8 @@ def safe_official_url(value):
 
 
 def copy_context(task, vote, request, current_url):
+    if task.model_result.get('copy_policy') == POLICY:
+        return document_context(task,vote,request,current_url)
     articles = articles_for(task)
     sources = {}
     for source in NormSource.objects.filter(norm_id=task.norm_id, crawl_run_id=task.crawl_run_id,
@@ -145,8 +148,46 @@ def copy_context(task, vote, request, current_url):
     return context
 
 
+def document_context(task, vote, request, current_url):
+    documents = task.model_result.get('documents', [])
+    versions = [d['version'] for d in documents] or ['original']
+    selected = request.GET.get('version') or ('actualizada' if 'actualizada' in versions else versions[0])
+    if selected not in versions:
+        raise Http404
+    checks=[]
+    for doc in documents:
+        proof=doc['integrity']
+        source=NormSource.objects.filter(pk=doc.get('source_id'),norm_id=task.norm_id).first()
+        key=proof.get('key','document:'+doc['version']+':missing:'+hashlib.sha256(doc.get('text','').encode()).hexdigest())
+        saved=vote.checks.get(key) if vote else None
+        if not saved and getattr(request,'user',None):
+            # Same norm, same version, same source/local content. Batch arrival is irrelevant.
+            for previous in NormReview.objects.filter(task__norm_id=task.norm_id,user_id=request.user.pk).order_by('-updated_at'):
+                candidate=previous.checks.get(key)
+                if candidate and candidate.get('scope')=='document':
+                    saved=candidate;break
+        saved=saved or {}
+        checks.append({'key':key,'label':'Texto completo · '+VERSIONS.get(doc['version'],doc['version']),
+            'step':'document','version':doc['version'],'version_label':VERSIONS.get(doc['version'],doc['version']),
+            'text':doc['text'],'source':source,'proof':proof,'scope':'document',
+            'status':saved.get('status','pendiente'),'notes':saved.get('notes',''),'issues':saved.get('issues',[]),
+            'saved':bool(saved),'complete':saved.get('status') in ('validada','rechazada'),
+            'status_label':STATUS_LABELS.get(saved.get('status'),'Sin revisión humana'),
+            'url':current_url+'&'+urlencode({'version':doc['version'],'step':'document'})})
+    current=next((c for c in checks if c['version']==selected),None)
+    source=current['source'] if current else None
+    return {'document_mode':True,'step':'document','steps':[],'checks':checks,'control':current,
+        'version':selected,'version_label':VERSIONS.get(selected,selected),
+        'versions':[{'key':v,'label':VERSIONS.get(v,v)} for v in versions],
+        'source':source,'source_url':reverse('review:copy_source',args=[task.pk,source.pk]) if source else None,
+        'official_url':safe_official_url(source.url) if source else None,
+        'source_label':'Fuente de la versión revisada','check_count':len(checks),
+        'checked_count':sum(c['complete'] for c in checks),'summary_url':current_url+'&finish=1',
+        'next_url':current_url+'&finish=1','snapshot':True,'legacy_vote':bool(vote and not any(k.startswith('document:') for k in vote.checks))}
+
+
 def aggregate(checks, saved):
-    statuses = [saved.get(c['key'], {}).get('status', 'pendiente') for c in checks]
+    statuses = [saved.get(c['key'], {}).get('status', 'validada' if c.get('proof',{}).get('status')=='coincide' else 'pendiente') for c in checks]
     if 'rechazada' in statuses:
         return 'rechazada'
     return 'validada' if statuses and all(s == 'validada' for s in statuses) else 'pendiente'
@@ -224,6 +265,10 @@ def source_response(task, source_id, focus):
 
 def available_sources(task):
     scope = Q(norm_id=task.norm_id, crawl_run_id=task.crawl_run_id)
+    if task.kind == 'indice' and task.model_result.get('copy_policy')==POLICY:
+        scope |= Q(norm_id=task.norm_id,pk__in=[d.get('source_id') for d in task.model_result.get('documents',[])])
+    if task.kind == 'pasaje' and task.reference_id:
+        scope |= Q(norm_id=task.reference.target_norm_id) if task.reference.target_norm_id else Q(pk__in=[])
     if task.kind == 'pasaje' and task.legal_change_id:
         related = {task.legal_change.amending_norm_id, task.legal_change.affected_norm_id} - {task.norm_id, None}
         scope |= Q(norm_id__in=related)

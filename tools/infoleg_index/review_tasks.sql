@@ -63,3 +63,35 @@ CREATE TABLE IF NOT EXISTS review_drafts (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(task_id,user_id)
 );
+
+-- A queue entry is not a legal document; replaced entries retain votes and history.
+ALTER TABLE review_tasks ADD COLUMN IF NOT EXISTS superseded BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE review_tasks ADD COLUMN IF NOT EXISTS superseded_reason TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS norm_references (
+  id BIGSERIAL PRIMARY KEY,
+  source_norm_id BIGINT NOT NULL REFERENCES norms(id),
+  source_version_id BIGINT NOT NULL REFERENCES norm_versions(id),
+  source_article_version_id BIGINT REFERENCES article_versions(id),
+  target_norm_id BIGINT REFERENCES norms(id),
+  target_type TEXT NOT NULL,
+  target_number TEXT NOT NULL,
+  target_article TEXT NOT NULL DEFAULT '',
+  relation_type TEXT NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'norma',
+  scope_detail TEXT NOT NULL DEFAULT '',
+  evidence_text TEXT NOT NULL,
+  resolution TEXT NOT NULL DEFAULT 'pendiente',
+  candidates JSONB NOT NULL DEFAULT '[]',
+  review_status TEXT NOT NULL DEFAULT 'pendiente',
+  reviewed_by TEXT,
+  reviewed_at TIMESTAMPTZ,
+  review_notes TEXT NOT NULL DEFAULT '',
+  fingerprint TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_reference_target ON norm_references(target_norm_id);
+CREATE INDEX IF NOT EXISTS idx_reference_pending ON norm_references(resolution) WHERE resolution <> 'resuelta';
+ALTER TABLE review_tasks ADD COLUMN IF NOT EXISTS reference_id BIGINT REFERENCES norm_references(id);
+
+ALTER TABLE norm_references ADD COLUMN IF NOT EXISTS assessment JSONB NOT NULL DEFAULT '{}';

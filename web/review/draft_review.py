@@ -96,7 +96,7 @@ def summary(entry, root_id, user, draft):
     _, tabs = norm_sections(entry, user)
     items = draft.data.get('items', {}) if draft else {}
     rows = []
-    tasks = {task.pk: task for task in ReviewTask.objects.filter(norm_id=entry.norm_id, crawl_run_id=entry.crawl_run_id).select_related('norm', 'article_version__article', 'article_version__norm_version')}
+    tasks = {task.pk: task for task in ReviewTask.objects.filter(norm_id=entry.norm_id, crawl_run_id=entry.crawl_run_id,superseded=False).select_related('norm', 'article_version__article', 'article_version__norm_version')}
     for tab in tabs.values():
         for case in tab['cases']:
             task = tasks[case['id']]
@@ -106,13 +106,16 @@ def summary(entry, root_id, user, draft):
                 for check in copy['checks']:
                     item = items.get(key(task, check))
                     rows.append({'label': check['label'], 'section': tab['label'], 'url': check['url'],
-                                 'status': (item['fields'].get('status') or ['pendiente'])[0] or 'pendiente' if item else check['status'], 'draft': bool(item)})
+                                 'status': (item['fields'].get('status') or ['pendiente'])[0] or 'pendiente' if item else check['status'], 'automatic':check.get('proof',{}).get('status')=='coincide','draft': bool(item)})
             else:
                 item = items.get(key(task))
-                rows.append({'label': ('Artículo ' + case['article'] + ' · ' if case['article'] else '') + 'Caso ' + str(task.pk),
+                if not item and (task.decision != 'revision' or task.model_result.get('requires_processing')):
+                    continue
+                rows.append({'label': ('Propuesta temática de la norma' if task.model_result.get('scope')=='norma' else ('Artículo ' + case['article'] + ' · ' if case['article'] else '') + 'Relación propuesta'),
                              'section': tab['label'], 'url': case['url'],
                              'status': (item['fields'].get('status') or ['pendiente'])[0] or 'pendiente' if item else task.review_status, 'draft': bool(item)})
     labels = copy_review.STATUS_LABELS
+    rows=[row for row in rows if row.get('draft') or not row.get('automatic')]
     for row in rows:
         row['status_label'] = labels[row['status']]
     return {'rows': rows, 'total': len(rows), 'done': sum(r['status'] != 'pendiente' for r in rows),

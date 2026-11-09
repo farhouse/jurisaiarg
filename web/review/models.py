@@ -238,11 +238,57 @@ class CrawlJob(models.Model):
         return self.status in ("queued", "running")
 
 
+class NormRelation(models.Model):
+    source_norm = models.ForeignKey(Norm, models.DO_NOTHING, related_name='official_links_out')
+    target_norm = models.ForeignKey(Norm, models.DO_NOTHING, related_name='official_links_in')
+    relation_type = models.TextField()
+    evidence_text = models.TextField()
+    review_status = models.TextField(default='pendiente')
+
+    class Meta:
+        managed = False
+        db_table = 'norm_relations'
+
+
+class NormReference(models.Model):
+    source_norm = models.ForeignKey(Norm, models.DO_NOTHING, related_name='references_made')
+    source_version = models.ForeignKey(NormVersion, models.DO_NOTHING)
+    source_article_version = models.ForeignKey(ArticleVersion, models.DO_NOTHING, null=True)
+    target_norm = models.ForeignKey(Norm, models.DO_NOTHING, null=True, related_name='references_received')
+    target_type = models.TextField()
+    target_number = models.TextField()
+    target_article = models.TextField(default='')
+    relation_type = models.TextField()
+    scope = models.TextField(default='norma')
+    scope_detail = models.TextField(default='')
+    evidence_text = models.TextField()
+    resolution = models.TextField(default='pendiente')
+    candidates = models.JSONField(default=list)
+    assessment = models.JSONField(default=dict)
+    review_status = models.TextField(default='pendiente')
+    reviewed_by = models.TextField(null=True)
+    reviewed_at = models.DateTimeField(null=True)
+    review_notes = models.TextField(default='')
+    fingerprint = models.TextField(unique=True)
+    created_at = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = 'norm_references'
+
+    @property
+    def target_reference(self):
+        return self.target_norm.display_reference if self.target_norm_id else f'{self.target_type} {self.target_number}'
+
+
 class ReviewTask(models.Model):
     crawl_run = models.ForeignKey(CrawlRun, models.DO_NOTHING)
     norm = models.ForeignKey(Norm, models.DO_NOTHING)
     article_version = models.ForeignKey(ArticleVersion, models.DO_NOTHING, null=True)
     legal_change = models.ForeignKey(LegalChange, models.DO_NOTHING, null=True)
+    reference = models.ForeignKey(NormReference, models.DO_NOTHING, null=True)
+    superseded = models.BooleanField(default=False)
+    superseded_reason = models.TextField(default="")
     kind = models.TextField(choices=[("indice", "Calidad del índice"), ("pasaje", "Interpretación del texto")])
     source_text = models.TextField()
     decision = models.TextField(choices=[("revision", "Requiere revisión"), ("aceptacion_automatica", "Acuerdo automático"), ("sin_cambio_detectado", "Sin cambio detectado")])
@@ -266,6 +312,12 @@ class ReviewTask(models.Model):
     @property
     def reasons_display(self):
         labels = {
+            'copia_diferente':'La copia o su articulado presentan diferencias con la fuente',
+            'materias_demasiado_amplias':'El modelo propuso demasiadas materias; hace falta comprobar el tema central',
+            'materia_ambigua':'La materia jurídica no quedó resuelta con suficiente confianza',
+            'materia_no_identificada':'No se identificó una materia para el contenido sustantivo',
+            'referencia_ambigua':'La referencia coincide con varias normas del catálogo',
+            'relacion_ambigua':'El efecto o los artículos afectados no están determinados',
             'catalogo_experimental': 'Revisar materias y conceptos propuestos; el catálogo está en evaluación',
             "control_del_indice": "Comprobar la ficha y el articulado descargado",
             "probabilidad_baja": "Probabilidad menor a 0,75",

@@ -16,6 +16,8 @@ from job_activity import JobActivity
 from crawl_infoleg_pg import crawl_ids
 from extract_legal_changes import main as parse_changes
 from prepare_review import main as prepare_review
+from references import sync_references
+from review_documents import refresh_queue, reparse_saved
 
 
 def database_dsn():
@@ -46,6 +48,8 @@ def initialize(dsn):
     with psycopg.connect(dsn) as con:
         for name in ('schema.sql', 'review_tasks.sql', 'crawl_jobs.sql', 'enrichment.sql'):
             con.execute(Path(__file__).with_name(name).read_text())
+        sync_references(con)
+        refresh_queue(con)
 
 
 def recover_interrupted(con):
@@ -85,7 +89,11 @@ def process_next(con, dsn):
             con.execute("UPDATE crawl_jobs SET stage='parser' WHERE id=%s", (job['id'],))
             con.commit()
             report('Extrayendo relaciones con el parser')
+            if job['mode']=='process':
+                reparse_saved(con,run_id,report)
             parse_changes(['--dsn', dsn, '--infoleg-ids', *map(str, ids)], report=report)
+            norm_ids=[r[0] for r in con.execute('SELECT norm_id FROM crawl_items WHERE crawl_run_id=%s AND norm_id IS NOT NULL',(run_id,))]
+            sync_references(con,norm_ids)
             if job['mode'] != 'download':
                 # Cada proceso termina antes de cargar el siguiente modelo y libera su RAM.
                 for stage in ('classify', 'embeddings'):
@@ -96,7 +104,7 @@ def process_next(con, dsn):
             con.execute("UPDATE crawl_jobs SET stage='review' WHERE id=%s", (job['id'],))
             con.commit()
             report('Preparando controles para revisión')
-            prepare_review(['--dsn', dsn, '--run-id', str(run_id), '--indices-only'], report=report)
+            prepare_review(['--dsn', dsn, '--run-id', str(run_id), '--indices-only','--refresh-documents'], report=report)
             status = con.execute("SELECT status FROM crawl_runs WHERE id=%s", (run_id,)).fetchone()[0]
             con.execute("UPDATE crawl_jobs SET status=%s, stage='finished', finished_at=now() WHERE id=%s",
                         ('done' if status == 'ok' else 'partial', job['id']))

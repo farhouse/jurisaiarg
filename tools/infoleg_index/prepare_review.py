@@ -12,6 +12,7 @@ from psycopg.types.json import Jsonb
 
 from legal_parser import NOTE_BLOCK, extract_legal_changes, fingerprint
 from try_laya import MODEL_REVISION, TRIAGE_VERSION, classify
+from review_documents import index_result, refresh_queue
 
 
 def passages(text, width=1800, overlap=180):
@@ -30,14 +31,14 @@ def passages(text, width=1800, overlap=180):
             break
 
 
-def save_task(con, run_id, norm_id, kind, text, result, article_id=None, change_id=None, key=None):
+def save_task(con, run_id, norm_id, kind, text, result, article_id=None, change_id=None, key=None, reference_id=None):
     con.execute(
         """INSERT INTO review_tasks(crawl_run_id,norm_id,kind,source_text,decision,
-             prediction,probability,reasons,model_result,article_version_id,legal_change_id,fingerprint)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(fingerprint) DO NOTHING""",
+             prediction,probability,reasons,model_result,article_version_id,legal_change_id,fingerprint,reference_id)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(fingerprint) DO NOTHING""",
         (run_id, norm_id, kind, text, result["decision"], result.get("prediction"),
          result.get("predicted_probability"), Jsonb(result["review_reasons"]), Jsonb(result),
-         article_id, change_id, key),
+         article_id, change_id, key, reference_id),
     )
     con.commit()
 
@@ -47,6 +48,7 @@ def main(argv=None, router=None, report=None, ensure_model=None):
     cli.add_argument("--dsn", required=True)
     cli.add_argument("--run-id", required=True, type=int)
     cli.add_argument("--indices-only", action="store_true", help="Preparar controles de índice sin cargar Laya")
+    cli.add_argument('--refresh-documents',action='store_true',help='Actualizar la copia usando exclusivamente las fuentes guardadas de este lote')
     args = cli.parse_args(argv)
     os.environ.setdefault("HF_HOME", str(Path(__file__).resolve().parent / ".laya-cache"))
     os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
@@ -60,22 +62,15 @@ def main(argv=None, router=None, report=None, ensure_model=None):
         for norm_id, infoleg_id, title, subject, article_count, status in items:
             if report:
                 report('Preparando controles para revisión', document=f'InfoLEG {infoleg_id}')
-            identity = con.execute('SELECT norm_type,number,issuing_body,summary FROM norms WHERE id=%s', (norm_id,)).fetchone()
-            articles = con.execute('''SELECT a.article_label,nv.version_type,av.text_normalized
-                FROM article_versions av JOIN articles a ON a.id=av.article_id
-                JOIN norm_versions nv ON nv.id=av.norm_version_id WHERE a.norm_id=%s
-                AND nv.id IN (SELECT DISTINCT ON (version_type) id FROM norm_versions
-                  WHERE norm_id=a.norm_id ORDER BY version_type,id DESC)
-                ORDER BY nv.id,a.ordinal,av.id''', (norm_id,)).fetchall()
-            text = f"InfoLEG {infoleg_id}\n{title or subject or 'Sin título'}\nEstado de descarga: {status.replace('_', ' ')}\nArtículos disponibles: {article_count}"
-            documents = con.execute('''SELECT DISTINCT ON (version_type) version_type,full_text_original
-                FROM norm_versions WHERE norm_id=%s ORDER BY version_type,id DESC''', (norm_id,)).fetchall()
-            save_task(con, args.run_id, norm_id, "indice", text,
-                      {"decision": "revision", "review_reasons": ["control_del_indice"],
-                       "identity": dict(zip(('type','number','issuer','summary'), identity)),
-                       "documents": [dict(zip(('version', 'text'), row)) for row in documents],
-                       "articles": [dict(zip(('label','version','text'), row)) for row in articles]},
-                      key=f"index:{args.run_id}:{norm_id}")
+            cached = con.execute("SELECT model_result FROM review_tasks WHERE kind='indice' AND crawl_run_id=%s AND norm_id=%s", (args.run_id,norm_id)).fetchone()
+            result = index_result(con,args.run_id,norm_id,cached[0] if cached else None,rebuild=args.refresh_documents)
+            if cached and args.refresh_documents:
+                con.execute("UPDATE review_tasks SET model_result=%s,decision=%s,reasons=%s WHERE kind='indice' AND crawl_run_id=%s AND norm_id=%s",
+                    (Jsonb(result),result['decision'],Jsonb(result['review_reasons']),args.run_id,norm_id))
+            text = f"InfoLEG {infoleg_id}\n{title or subject or 'Sin título'}"
+            if not cached:
+                save_task(con,args.run_id,norm_id,'indice',text,result,key=f'index:{args.run_id}:{norm_id}')
+        refresh_queue(con,args.run_id)
         if args.indices_only:
             print(f"indices={len(items)}; controles preparados (sin ejecutar Laya en esta etapa)", flush=True)
             return
@@ -92,6 +87,8 @@ def main(argv=None, router=None, report=None, ensure_model=None):
         con.commit()
         for av_id, norm_id, infoleg_id, article_key, text in rows:
             for fragment_number, (fragment, divided) in enumerate(passages(text), 1):
+                if not extract_legal_changes(fragment):
+                    continue
                 if report:
                     report('Contrastando relaciones con Laya', document=f'InfoLEG {infoleg_id} · artículo {article_key}', fragment=fragment_number)
                 key = hashlib.sha256(f"{args.run_id}|{av_id}|{MODEL_REVISION}|{TRIAGE_VERSION}|0.75|{fragment}".encode()).hexdigest()
@@ -116,17 +113,18 @@ def main(argv=None, router=None, report=None, ensure_model=None):
                 if report:
                     report('Contrastando relaciones con Laya', document=f'InfoLEG {infoleg_id} · artículo {article_key}', fragment=fragment_number)
                 result = classify(router, {"text": fragment, "infoleg_id": infoleg_id})
-                if candidates and not resolved:
-                    result["review_reasons"].append("norma_sin_resolver")
                 if divided:
                     result["review_reasons"].append("fragmento_dividido")
                 if result["review_reasons"]:
                     result["decision"] = "revision"
                 result["requires_review"] = result["decision"] == "revision"
                 result.update(model_revision=MODEL_REVISION, triage_version=TRIAGE_VERSION, min_probability=0.75)
-                save_task(con, args.run_id, norm_id, "pasaje", fragment, result, av_id, change_id, key)
+                if result['requires_review']:
+                    save_task(con,args.run_id,norm_id,'pasaje',fragment,result,av_id,change_id,key)
                 counts[result["decision"]] += 1
             print(f"InfoLEG {infoleg_id} art. {article_key}: {dict(counts)}", flush=True)
+        from references import prepare_reference_issues
+        prepare_reference_issues(con,args.run_id,router,report,ensure_model)
         print(json.dumps({"indices": len(items), "articles": len(rows), **counts}), flush=True)
         con.execute("UPDATE crawl_runs SET review_prepared_at=now() WHERE id=%s", (args.run_id,))
         con.commit()

@@ -1,13 +1,13 @@
-<div class="review-session" data-draft-revision="{{ draft_revision }}" data-draft-count="{{ draft_count }}"><div><strong>Tu avance</strong><span data-save-state role="status" aria-live="polite">{% if draft_count %}Borrador guardado · {{ draft_count }} controles con cambios{% else %}Sin cambios nuevos{% endif %}</span><button type="button" class="button" data-retry-save hidden>Reintentar guardado</button></div><a class="button" href="{{ finish_url }}">Resumen y finalizar</a></div>
-<nav class="norm-review-tabs" aria-label="Secciones de revisión de esta norma">
+<div class="review-session" {% if modern and dossier and not draft_count %}hidden{% endif %} data-draft-revision="{{ draft_revision }}" data-draft-count="{{ draft_count }}"><div><strong>Tu avance</strong><span data-save-state role="status" aria-live="polite">{% if draft_count %}Borrador guardado · {{ draft_count }} controles con cambios{% else %}Sin cambios nuevos{% endif %}</span><button type="button" class="button" data-retry-save hidden>Reintentar guardado</button></div><a class="button" href="{{ finish_url }}">Resumen y finalizar</a></div>
+{% if modern %}{% if not dossier %}<nav class="dossier-navigation" aria-label="Volver a la ficha"><a href="{% url 'review:task' root_id %}?tab=dossier">Ficha de la norma</a>{% if not dossier %}<span>Revisión de una observación concreta</span>{% endif %}</nav>{% endif %}{% else %}<nav class="norm-review-tabs" aria-label="Secciones de revisión de esta norma">
   {% for tab in tabs %}<a href="{{ tab.url }}" {% if tab.key == active_tab.key %}aria-current="page"{% endif %}><strong>{{ tab.label }}</strong><span>{% if tab.total %}{{ tab.reviewed }} de {{ tab.total }} {% if tab.key == 'copy' %}revisados por vos{% else %}revisados{% endif %}{% else %}Sin casos preparados{% endif %}</span></a>{% endfor %}
-</nav>
+</nav>{% endif %}
 {% if processing_job.active %}<p class="notice">El procesamiento de este lote está {{ processing_job.get_status_display|lower }}. Los casos disponibles pueden aumentar; estos contadores todavía son parciales.</p>{% endif %}
 <section class="norm-review-section" aria-label="{{ active_tab.label }}">
-{% if finish_summary %}{% include 'review/finish_summary.html' %}{% elif task %}
+{% if dossier %}{% include 'review/dossier.html' %}{% elif finish_summary %}{% include 'review/finish_summary.html' %}{% elif task %}
 {% if conflict_revision != None %}<aside class="review-conflict notice" role="alert"><strong>Este caso cambió mientras lo revisabas.</strong><p>Último resultado confirmado: {{ conflict_status }}. {{ conflict_notes }}</p>{% if passage.changes %}<p>Correcciones confirmadas: {{ passage.changes|join:'; ' }}</p>{% endif %}<p>Tu borrador se conserva abajo. Compará los cambios antes de continuar.</p><button class="button" type="button" data-rebase="{{ conflict_revision }}">Conservar mi borrador sobre la revisión actual</button></aside>{% endif %}
 {% if task.kind == 'indice' %}
-{% include 'review/copy_task.html' %}
+{% if copy.document_mode %}{% include 'review/copy_document.html' %}{% else %}{% include 'review/copy_task.html' %}{% endif %}
 {% else %}
 {% include 'review/passage_task.html' %}
 {% endif %}

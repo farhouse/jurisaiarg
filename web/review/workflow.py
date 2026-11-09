@@ -7,7 +7,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Count, Exists, OuterRef, Q
+from django.db.models import BooleanField, Case, Count, Exists, OuterRef, Q, Value, When
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -15,8 +15,8 @@ from django.utils import timezone
 from django.views.decorators.http import require_safe
 
 from .forms import DecisionForm
-from .models import CrawlJob, CrawlRun, LegalChange, NormReview, ReviewDraft, ReviewEvent, ReviewTask
-from . import copy_review, passage_review, draft_review
+from .models import CrawlJob, CrawlRun, LegalChange, NormReview, ReviewDraft, ReviewEvent, ReviewTask, NormReference
+from . import copy_review, passage_review, draft_review, dossier
 
 
 def validator_required(view):
@@ -52,6 +52,8 @@ class CopyDecisionForm(DecisionForm):
     def clean(self):
         data = super().clean()
         if data.get('status') == 'validada':
+            if self.control.get('scope')=='document' and self.control['proof']['status']=='diferencias' and not data.get('notes'):
+                self.add_error('notes','El control automático encontró diferencias. Explicá por qué la copia completa es correcta o señalá el problema.')
             if not self.control['source']:
                 self.add_error('status', 'Falta la fuente de este lote. Dejá pendiente este control hasta poder compararlo.')
             if data.get('issues'):
@@ -64,8 +66,27 @@ def guide(request):
 
 
 def personal_tasks(tasks, user):
-    return tasks.annotate(my_completed=Exists(NormReview.objects.filter(
-        task_id=OuterRef("pk"), user_id=user.pk).exclude(status="pendiente")))
+    roots=list(tasks.filter(kind='indice',model_result__copy_policy='document-integrity-v2').values('pk','norm_id','model_result'))
+    previous={}
+    own={}
+    for vote in NormReview.objects.filter(task__norm_id__in={r['norm_id'] for r in roots},user_id=user.pk).order_by('-updated_at').values('task_id','task__norm_id','checks'):
+        own[vote['task_id']]=vote['checks']
+        for key,check in vote['checks'].items():
+            if check.get('scope')=='document':
+                previous.setdefault((vote['task__norm_id'],key),check)
+    completed=[]
+    for root in roots:
+        current=[]
+        for doc in root['model_result'].get('documents',[]):
+            key=doc['integrity'].get('key')
+            check=own.get(root['pk'],{}).get(key) or previous.get((root['norm_id'],key),{})
+            current.append((doc['integrity']['status'],check.get('status') in ('validada','rechazada')))
+        if any(done for _,done in current) and all(done for status,done in current if status=='diferencias'):
+            completed.append(root['pk'])
+    return tasks.annotate(my_completed=Case(
+        When(kind='indice',model_result__copy_policy='document-integrity-v2',then=Case(When(pk__in=completed,then=Value(True)),default=Value(False),output_field=BooleanField())),
+        default=Exists(NormReview.objects.filter(task_id=OuterRef('pk'),user_id=user.pk).exclude(status='pendiente')),
+        output_field=BooleanField()))
 
 
 def pending_tasks(tasks, user):
@@ -76,7 +97,7 @@ def pending_tasks(tasks, user):
 @validator_required
 def queue(request):
     run = selected_run(request)
-    base = ReviewTask.objects.filter(crawl_run=run)
+    base = ReviewTask.objects.filter(crawl_run=run,superseded=False)
     tasks = personal_tasks(base.select_related("norm"), request.user)
     scope = request.GET.get("scope", "queue")
     if scope == "queue":
@@ -89,9 +110,14 @@ def queue(request):
         tasks = tasks.filter(Q(kind="indice", my_completed=True) | Q(kind="pasaje", reviewed_by=request.user.get_username()) & ~Q(review_status="pendiente"))
     elif scope != "all":
         raise Http404
+    # A norm dossier is the work unit; fragments remain internal evidence.
+    modern = ReviewTask.objects.filter(crawl_run=run,kind='indice',model_result__copy_policy='document-integrity-v2').values('norm_id')
+    modern_ids=set(modern.values_list('norm_id',flat=True))
     kind = request.GET.get("kind", "")
     if kind in ("indice", "pasaje"):
         tasks = tasks.filter(kind=kind)
+    grouped = tasks.filter(norm_id__in=modern).order_by('norm_id','kind','id').distinct('norm_id').values('id')
+    tasks = tasks.filter(Q(norm_id__in=modern,pk__in=grouped)|~Q(norm_id__in=modern))
     query = request.GET.get("q", "").strip()
     if query:
         condition = Q(norm__number__icontains=query) | Q(norm__canonical_title__icontains=query)
@@ -101,6 +127,7 @@ def queue(request):
     page = Paginator(tasks.order_by("kind", "id"), 20).get_page(request.GET.get("page"))
     own_votes = {vote.task_id: vote for vote in NormReview.objects.filter(task_id__in=[task.pk for task in page], user_id=request.user.pk)}
     for task in page:
+        task.is_dossier=task.norm_id in modern_ids
         if task.kind == "indice":
             vote = own_votes.get(task.pk)
             task.review_status = vote.status if vote else "pendiente"
@@ -111,10 +138,14 @@ def queue(request):
     return render(request, "review/queue.html", {
         "run": run, "runs": CrawlRun.objects.all()[:30], "page": page,
         "scope": scope, "kind": kind, "query": query, "params": params.urlencode(),
-        "pending": pending_tasks(base, request.user).filter(decision="revision").count(),
+        "pending": work_count(pending_tasks(base, request.user).filter(decision="revision"),modern),
         "my_count": NormReview.objects.filter(task__crawl_run=run, user_id=request.user.pk).exclude(status="pendiente").count() + base.filter(kind="pasaje", reviewed_by=request.user.get_username()).exclude(review_status="pendiente").count(),
-        "automatic": base.exclude(decision="revision").filter(review_status="pendiente").count(),
+        "automatic": work_count(base.exclude(decision="revision").filter(review_status="pendiente"),modern),
     })
+
+
+def work_count(tasks, modern):
+    return tasks.filter(norm_id__in=modern).values('norm_id').distinct().count()+tasks.exclude(norm_id__in=modern).count()
 
 
 def review_url(root_id, tab, case=None):
@@ -126,7 +157,7 @@ def review_url(root_id, tab, case=None):
 
 def norm_sections(entry, user):
     # Solo metadatos para navegar: el texto completo se carga al abrir cada caso.
-    rows = list(ReviewTask.objects.filter(norm_id=entry.norm_id, crawl_run_id=entry.crawl_run_id)
+    rows = list(ReviewTask.objects.filter(norm_id=entry.norm_id, crawl_run_id=entry.crawl_run_id,superseded=False)
                 .order_by('id').values('id', 'kind', 'model_result__category', 'review_status',
                                       'article_version__article__article_label', 'article_version__norm_version__version_type'))
     votes = dict(NormReview.objects.filter(task_id__in=[row['id'] for row in rows if row['kind'] == 'indice'],
@@ -174,7 +205,8 @@ def record_decision(locked, user, form, copy, passage, control, guided_post, pro
             notes = ', '.join(dict(copy_review.ISSUES)[key] for key in issues)
         check_result = {'status': status, 'notes': notes, 'issues': issues,
                         'source_id': control['source'].pk if control['source'] else None,
-                        'label': control['label'], 'updated_at': now.isoformat()}
+                        'label': control['label'], 'updated_at': now.isoformat(),
+                        **({'scope':'document','version':control['version'],'source_hash':control['proof'].get('source_hash'), 'extracted_hash':control['proof'].get('extracted_hash')} if control.get('scope')=='document' else {})}
         checks[control['key']] = check_result
         details = {'check': control['key'], **check_result}
         event_notes = control['label'] + ': ' + (notes or copy_review.STATUS_LABELS[status])
@@ -195,6 +227,8 @@ def record_decision(locked, user, form, copy, passage, control, guided_post, pro
         locked.reviewed_at = now if status != "pendiente" else None
         locked.revision += 1
         locked.save(update_fields=["review_status", "review_notes", "reviewed_by", "reviewed_at", "revision", 'proposed_correction'])
+        if locked.reference_id:
+            NormReference.objects.filter(pk=locked.reference_id).update(review_status=status,review_notes=notes,reviewed_by=locked.reviewed_by,reviewed_at=locked.reviewed_at)
         if locked.legal_change_id:
             LegalChange.objects.filter(pk=locked.legal_change_id).update(review_status=status, review_notes=notes, reviewed_by=locked.reviewed_by, reviewed_at=locked.reviewed_at, updated_at=now)
 
@@ -214,12 +248,24 @@ def focus_tabs(tabs, entry, root_id, focus, version):
 @validator_required
 def task_detail(request, pk):
     entry = get_object_or_404(ReviewTask.objects.select_related('norm', 'crawl_run'), pk=pk)
+    if entry.superseded:
+        root = ReviewTask.objects.filter(norm_id=entry.norm_id,crawl_run_id=entry.crawl_run_id,kind='indice').first()
+        if root:
+            return redirect(reverse('review:task',args=[root.pk]))
     root_id, tabs = norm_sections(entry, request.user)
     draft = ReviewDraft.objects.filter(task_id=root_id, user_id=request.user.pk).first()
     if request.method == 'GET' and entry.pk == root_id and not request.GET and draft and draft.data.get('items') and draft.data.get('cursor'):
         return redirect(reverse('review:task', args=[root_id]) + '?' + urlencode(draft.data['cursor']))
-    default_tab = 'copy' if entry.kind == 'indice' else ('topics' if entry.model_result.get('category') == 'temas' else 'relations')
+    modern = ReviewTask.objects.filter(pk=root_id,model_result__copy_policy='document-integrity-v2').exists()
+    default_tab = 'dossier' if modern else 'copy' if entry.kind == 'indice' else ('topics' if entry.model_result.get('category') == 'temas' else 'relations')
     tab_key = request.GET.get('tab', default_tab)
+    if modern and tab_key=='dossier':
+        if request.method!='GET':raise Http404
+        draft_count=len(draft.data.get('items',{})) if draft else 0
+        data=dossier.context(entry,root_id,request)
+        return render(request,'review/task.html',{'norm':entry.norm,'run':entry.crawl_run,'root_id':root_id,'task':data['root'],
+            'dossier':data,'modern':True,'tabs':tabs.values(),'draft_count':draft_count,'draft_revision':draft.revision if draft else 0,
+            'finish_url':review_url(root_id,'copy')+'&finish=1'})
     if tab_key not in tabs:
         raise Http404
     active_tab = tabs[tab_key]
@@ -243,7 +289,7 @@ def task_detail(request, pk):
     job = CrawlJob.objects.filter(crawl_run_id=entry.crawl_run_id, mode__in=['full', 'process']).order_by('-id').first()
     context = {'norm': entry.norm, 'run': entry.crawl_run, 'root_id': root_id,
                'tabs': tabs.values(), 'active_tab': active_tab, 'section_cases': cases, 'processing_job': job,
-               'draft_revision': draft.revision if draft else 0, 'draft_count': len(draft.data.get('items', {})) if draft else 0,
+               'modern':modern, 'draft_revision': draft.revision if draft else 0, 'draft_count': len(draft.data.get('items', {})) if draft else 0,
                'finish_url': review_url(root_id, 'copy') + '&finish=1', 'focused_article': request.GET.get('focus_article', '')}
     if request.GET.get('finish') == '1':
         context.update(finish_summary=draft_review.summary(entry, root_id, request.user, draft), task=entry, confirmed=request.GET.get('confirmed') == '1' and bool(draft and 'finalized_revision' in draft.data and not draft.data.get('items')))
@@ -254,7 +300,7 @@ def task_detail(request, pk):
             raise Http404
         return render(request, 'review/task.html', context)
     task = get_object_or_404(ReviewTask.objects.select_related('norm', 'article_version__norm_version',
-                              'article_version__article', 'legal_change__amending_norm', 'legal_change__affected_norm', 'legal_change__affected_article'), pk=current['id'])
+                              'article_version__article', 'legal_change__amending_norm', 'legal_change__affected_norm', 'legal_change__affected_article','reference__source_norm','reference__target_norm','reference__source_article_version__article'), pk=current['id'])
     position = cases.index(current)
     context.update(case_position=position + 1, previous_case=cases[position - 1] if position else None,
                    next_case=cases[position + 1] if position + 1 < len(cases) else None,
@@ -283,6 +329,8 @@ def task_detail(request, pk):
         form = passage_review.proposal_form(task, request.POST if proposal_post else None, initial)
     else:
         form = DecisionForm(request.POST if request.method == 'POST' else None, initial=initial)
+    if modern and request.method=='POST' and not guided_post and not proposal_post:
+        raise Http404  # A legacy identity/global form cannot approve a new document scope.
     if request.method == 'POST' and request.POST.get('draft') == '1':
         if not (guided_post and control or proposal_post and passage):
             raise Http404
@@ -391,7 +439,7 @@ def management(request):
     page = Paginator(laws, 25).get_page(request.GET.get("page"))
     params = request.GET.copy()
     params.pop("page", None)
-    tasks = ReviewTask.objects.filter(crawl_run=run)
+    tasks = ReviewTask.objects.filter(crawl_run=run,superseded=False)
     return render(request, "review/management.html", {
         "run": run, "runs": CrawlRun.objects.all()[:30], "page": page,
         "query": query, "status": status, "params": params.urlencode(),

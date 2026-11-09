@@ -12,8 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'web' / 'review') i
 from embedding import (VERSION as EMBEDDING_VERSION, MODEL as EMBEDDING_MODEL,
                        REVISION as EMBEDDING_REVISION, encode, fragments, runtime)
 from job_activity import JobActivity, prepare_model
-from prepare_review import main as prepare_review, passages, save_task
-from topics import VERSION as TOPICS_VERSION, classify_topics
+from prepare_review import main as prepare_review, save_task
+from topics import VERSION as TOPICS_VERSION, classify_norm_topics
 from try_laya import MODEL_REVISION
 
 
@@ -56,29 +56,31 @@ def classify_batch(con, dsn, run_id, job_id, report=None):
         router.load('multilingual')
         loaded = True
 
-    rows = chunks(con, run_id)
+    rows = con.execute("""SELECT n.id,n.infoleg_id,n.canonical_title,n.subject,n.summary,nv.id,nv.version_type,nv.full_text_original
+        FROM norms n JOIN LATERAL (SELECT * FROM norm_versions WHERE norm_id=n.id
+            ORDER BY (version_type='actualizada') DESC,id DESC LIMIT 1) nv ON true
+        WHERE n.id IN (SELECT norm_id FROM crawl_items WHERE crawl_run_id=%s) ORDER BY n.infoleg_id""", (run_id,)).fetchall()
     con.commit()
-    progress(con, job_id, 'classify', 0, len(rows))
-    for done, (chunk_id, norm_id, article_id, text, source_hash) in enumerate(rows, 1):
-        label = document(con, chunk_id) if report else ''
-        for fragment_number, (fragment, divided) in enumerate(passages(text), 1):
-            if report:
-                report('Clasificando materias con Laya', document=label, fragment=fragment_number)
-            key = 'topics:' + hashlib.sha256(f'{run_id}|{norm_id}|{article_id}|{TOPICS_VERSION}|{MODEL_REVISION}|{fragment}'.encode()).hexdigest()
-            exists = con.execute('SELECT 1 FROM review_tasks WHERE fingerprint=%s', (key,)).fetchone()
-            con.commit()
-            if exists:
-                continue
+    progress(con,job_id,'classify',0,len(rows))
+    for done,(norm_id,infoleg_id,title,subject,summary,version_id,version,text) in enumerate(rows,1):
+        heading = '\n'.join(filter(None,[title,subject,summary]))
+        key = 'topics:norm:' + hashlib.sha256(f'{run_id}|{norm_id}|{version_id}|{TOPICS_VERSION}|{MODEL_REVISION}|{heading}|{text}'.encode()).hexdigest()
+        exists = con.execute('SELECT 1 FROM review_tasks WHERE fingerprint=%s', (key,)).fetchone()
+        if not exists:
             ensure_model()
             if report:
-                report('Clasificando materias con Laya', document=label, fragment=fragment_number)
-            result = classify_topics(router, fragment)
-            result['model_revision'] = MODEL_REVISION
-            result.update(source_chunk_id=chunk_id, source_hash=source_hash)
-            if divided:
-                result['review_reasons'].append('fragmento_dividido')
-            save_task(con, run_id, norm_id, 'pasaje', fragment, result, article_id=article_id, key=key)
-        progress(con, job_id, 'classify', done, len(rows))
+                report('Clasificando la norma con contexto', document=f'InfoLEG {infoleg_id}')
+            articles = [dict(zip(('label','text'),r)) for r in con.execute("""SELECT a.article_label,av.text_normalized FROM article_versions av JOIN articles a ON a.id=av.article_id WHERE av.norm_version_id=%s ORDER BY a.ordinal,av.id""", (version_id,))]
+            if not articles and text:
+                articles=[{'label':'Texto completo','text':text}]
+            result=classify_norm_topics(router,heading,articles,on_fragment=(
+                lambda label,number:report('Clasificando contenido con contexto',document=f'InfoLEG {infoleg_id} · artículo {label}',fragment=number)) if report else None)
+            result.update(model_revision=MODEL_REVISION,norm_version_id=version_id,version=version,source_hash=hashlib.sha256((text or '').encode()).hexdigest())
+            save_task(con,run_id,norm_id,'pasaje',text or heading,result,key=key)
+        con.execute("""UPDATE review_tasks SET superseded=true,superseded_reason='Reemplazado por clasificación con contexto de la norma; historial conservado'
+            WHERE crawl_run_id=%s AND norm_id=%s AND model_result->>'category'='temas' AND fingerprint<>%s AND NOT superseded""", (run_id,norm_id,key))
+        con.commit()
+        progress(con,job_id,'classify',done,len(rows))
     # Reutiliza el modelo cargado para contrastar relaciones parser/Laya.
     prepare_review(['--dsn', dsn, '--run-id', str(run_id)], router=router, report=report, ensure_model=ensure_model)
 

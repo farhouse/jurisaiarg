@@ -3,11 +3,11 @@ from django.db import connection
 from django.test import Client, TransactionTestCase
 from django.utils import timezone
 
-from .models import Article, ArticleVersion, CrawlItem, CrawlJob, CrawlRun, LegalChange, Norm, NormReview, ReviewDraft, NormSource, NormVersion, ReviewEvent, ReviewTask
+from .models import Article, ArticleVersion, CrawlItem, CrawlJob, CrawlRun, LegalChange, Norm, NormReview, NormReference, NormRelation, ReviewDraft, NormSource, NormVersion, ReviewEvent, ReviewTask
 
 
 class WorkflowTest(TransactionTestCase):
-    tables = [Norm, CrawlRun, NormSource, NormVersion, Article, ArticleVersion, LegalChange, CrawlItem, ReviewTask, ReviewEvent, NormReview, ReviewDraft, CrawlJob]
+    tables = [Norm, CrawlRun, NormSource, NormVersion, Article, ArticleVersion, LegalChange, NormReference, NormRelation, CrawlItem, ReviewTask, ReviewEvent, NormReview, ReviewDraft, CrawlJob]
 
     @classmethod
     def setUpClass(cls):
@@ -575,3 +575,71 @@ class WorkflowTest(TransactionTestCase):
         self.assertEqual(topic.review_status, 'rechazada')
         self.assertEqual(topic.proposed_correction['concepts'], ['Contrato','Dominio'])
         self.assertEqual(topic.model_result['concepts'], ['Contrato'])
+
+    def test_zzzzz_document_dossier_has_one_approval_and_global_incremental_relations(self):
+        from copy import deepcopy
+        from .text_integrity import POLICY, check_document
+        from .workflow import review_url
+        from .copy_review import document_context
+        user=User.objects.create_user('dossier-reviewer',is_staff=True)
+        self.client.force_login(user)
+        now=timezone.now()
+        run=CrawlRun.objects.create(requested_ids=[1],started_at=now,finished_at=now,status='ok',processed_count=1)
+        norm=Norm.objects.create(infoleg_id=1,norm_type='Ley',number='23600',canonical_title='EXPROPIACIONES',general_status='desconocida',index_status='completa',article_count=4)
+        text='EXPROPIACIONES\nArtículo 1° — Utilidad pública.\nArtículo 2° — Inmueble.\nArtículo 3° — Cuenta de tasas.\nArtículo 4° — Comuníquese.'
+        articles=[{'version':'original','label':str(i),'text':p} for i,p in enumerate(text.split('\n')[1:],1)]
+        html='<body><h1>EXPROPIACIONES</h1>'+''.join('<p>'+a['text']+'</p>' for a in articles)+'</body>'
+        source=NormSource.objects.create(norm=norm,crawl_run=run,url='https://servicios.infoleg.gob.ar/norma.htm',document_kind='texto_original',http_status=200,raw_content=html,retrieved_at=now)
+        version=NormVersion.objects.create(norm=norm,source=source,version_type='original',full_text_original=text,is_current=False)
+        proof=check_document(html,text,articles)
+        self.assertEqual(proof['status'],'coincide')
+        result={'copy_policy':POLICY,'documents':[{'version':'original','text':text,'norm_version_id':version.pk,'source_id':source.pk,'integrity':proof}],'articles':articles}
+        root=ReviewTask.objects.create(crawl_run=run,norm=norm,kind='indice',source_text=text,decision='aceptacion_automatica',fingerprint='dossier-root',created_at=now,model_result=result)
+        topic=ReviewTask.objects.create(crawl_run=run,norm=norm,kind='pasaje',source_text=text,decision='aceptacion_automatica',fingerprint='dossier-topics',created_at=now,model_result={'category':'temas','scope':'norma','contextual':True,'norm_version_id':version.pk,'version':'original','matters':[{'label':'Administrativo','score':.95}],'concepts':['Expropiación']})
+        base=f'/validar/{root.pk}/'
+        page=self.client.get(base)
+        self.assertContains(page,'Ficha de la norma')
+        self.assertContains(page,'Sin diferencias detectadas automáticamente.')
+        self.assertContains(page,'Administrativo')
+        self.assertEqual(page.context['dossier']['issues'],[])
+        self.assertEqual(len(page.context['dossier']['copy']['checks']),1)
+        self.assertEqual(self.client.get('/validar/?scope=queue').context['page'].paginator.count,0)
+        self.assertEqual(self.client.get('/validar/?scope=all').context['page'].paginator.count,1)
+        self.assertEqual(self.client.get('/validar/?scope=all&kind=pasaje').context['page'].paginator.count,1)
+        summary=self.client.get(base+'?tab=copy&finish=1')
+        self.assertEqual(summary.context['finish_summary']['total'],0)
+        # Legacy identity votes must not become complete-document approvals.
+        NormReview.objects.create(task=root,user_id=user.pk,username=user.username,status='validada',checks={'identity':{'status':'validada'}},updated_at=now)
+        self.assertFalse(self.client.get(base).context['dossier']['copy']['control']['complete'])
+        self.assertEqual(self.client.post(base+'?tab=copy',{'status':'validada','revision':0}).status_code,404)
+        url=review_url(root.pk,'copy',root.pk)+'&version=original'
+        payload={'check':proof['key'],'status':'validada','notes':'Copia completa comprobada','revision':1,'draft':1,'draft_revision':0}
+        self.assertEqual(self.client.post(url,payload,HTTP_X_REVIEW_ASYNC='1').status_code,200)
+        self.assertEqual(self.client.post(base+'finalizar/',{'draft_revision':1}).status_code,302)
+        vote=NormReview.objects.get(task=root,user_id=user.pk)
+        self.assertEqual(vote.checks[proof['key']]['scope'],'document')
+        self.assertEqual(ReviewEvent.objects.filter(task=root).count(),1)
+        # The next batch links into this older law, without mutating its review.
+        later=CrawlRun.objects.create(requested_ids=[102],started_at=now,finished_at=now,status='ok',processed_count=1)
+        other=Norm.objects.create(infoleg_id=102,norm_type='Ley',number='40000',general_status='desconocida',index_status='completa',article_count=1)
+        other_version=NormVersion.objects.create(norm=other,version_type='original',is_current=False)
+        NormReference.objects.create(source_norm=other,source_version=other_version,target_norm=norm,target_type='Ley',target_number='23600',target_article='1',relation_type='sustituye',scope='articulo',evidence_text='Sustitúyese el artículo 1 de la Ley 23.600.',resolution='resuelta',fingerprint='dossier-future-link',created_at=now)
+        page=self.client.get(base+'?tab=dossier')
+        self.assertContains(page,'Ley 40000')
+        self.assertContains(page,'Vínculo entrante')
+        self.assertContains(page,'Texto completo aprobado por vos.')
+        vote.refresh_from_db();self.assertEqual(vote.revision,2)
+        # An identical document in another batch inherits the decision; changed text does not.
+        newroot=ReviewTask.objects.create(crawl_run=later,norm=norm,kind='indice',source_text=text,decision='aceptacion_automatica',fingerprint='dossier-same',created_at=now,model_result=deepcopy(result))
+        self.assertTrue(self.client.get(f'/validar/{newroot.pk}/').context['dossier']['copy']['control']['complete'])
+        altered=deepcopy(result)
+        altered['documents'][0]['integrity']=check_document(html,text+' Cambio.',articles)
+        altered['documents'][0]['text']=text+' Cambio.'
+        newroot.model_result=altered;newroot.save()
+        self.assertFalse(self.client.get(f'/validar/{newroot.pk}/').context['dossier']['copy']['control']['complete'])
+        # Superseded article predictions remain in the database but never create another dossier.
+        topic.superseded=True;topic.save()
+        self.assertEqual(self.client.get(f'/validar/{topic.pk}/').url,base)
+        root.model_result=altered;root.decision='revision';root.save()
+        self.assertEqual(self.client.get(f'/validar/?run={run.pk}&scope=queue').context['page'].paginator.count,1)
+        vote.refresh_from_db();self.assertEqual(vote.status,'validada')  # The older scoped approval remains intact.

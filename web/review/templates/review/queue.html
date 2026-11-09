@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Validar · JurisAI{% endblock %}
 {% block content %}
-<header class="work-heading"><div><h1>Tu mesa de revisión</h1><p>Comprobá la fuente, decidí y continuá con el siguiente caso.</p></div><span class="user-work">{{ my_count }} decisiones tuyas en este lote</span></header>
+<header class="work-heading"><div><h1>Tu mesa de revisión</h1><p>Resolvé las dudas señaladas en cada norma. La ficha reúne el texto, las materias y sus relaciones.</p></div><span class="user-work">{{ my_count }} decisiones tuyas en este lote</span></header>
 {% if run %}
-<div class="work-summary"><span><strong>{{ pending }}</strong> casos pendientes para vos</span><span><strong>{{ automatic }}</strong> resultados automáticos disponibles para auditar</span></div>
-<p class="muted">En los índices, cada persona deja su propia decisión. Podés revisar una norma aunque otra persona ya la haya comprobado.</p>
+<div class="work-summary"><span><strong>{{ pending }}</strong> fichas o casos pendientes para vos</span><span><strong>{{ automatic }}</strong> resultados automáticos disponibles para auditar</span></div>
+<p class="muted">Las comprobaciones automáticas no cuentan como votos humanos. Cada aprobación de la copia conserva su contenido y versión.</p>
 {% if not run.review_prepared_at %}<p class="notice">La preparación de este lote todavía no está completa. Los casos aparecen a medida que se procesan.</p>{% endif %}
 {% endif %}
 <form method="get" class="work-filters">
@@ -14,13 +14,13 @@
   <label>Buscar<input name="q" value="{{ query }}" placeholder="ID InfoLEG, norma o título"></label>
   <button class="button" type="submit">Aplicar</button>
 </form>
-<div class="results-heading"><h2>{{ page.paginator.count }} casos</h2><span>{{ run.label|default:"Sin lotes todavía" }}</span></div>
+<div class="results-heading"><h2>{{ page.paginator.count }} fichas o casos</h2><span>{{ run.label|default:"Sin lotes todavía" }}</span></div>
 <section class="work-list" aria-label="Casos de revisión">
 {% for task in page %}
   <article class="work-row">
-    <div class="row-identity">{% if task.kind == 'indice' %}<small>Tu decisión:</small> {% endif %}<span class="badge {{ task.review_status }}">{{ task.get_review_status_display }}</span><small>{{ task.get_kind_display }} · InfoLEG {{ task.norm.infoleg_id }}</small><h3><a href="{% url 'review:task' task.pk %}">{{ task.norm.display_reference }}</a></h3><p>{{ task.norm.display_title|truncatechars:160 }}</p></div>
+    <div class="row-identity">{% if task.is_dossier %}<small>Ficha de la norma</small>{% elif task.kind == 'indice' %}<small>Tu decisión:</small> {% endif %}<span class="badge {{ task.review_status }}">{{ task.get_review_status_display }}</span><small>{% if task.is_dossier %}Revisión por norma{% else %}{{ task.get_kind_display }}{% endif %} · InfoLEG {{ task.norm.infoleg_id }}</small><h3><a href="{% url 'review:task' task.pk %}">{{ task.norm.display_reference }}</a></h3><p>{{ task.norm.display_title|truncatechars:160 }}</p></div>
     <div class="row-reason"><strong>{{ task.get_decision_display }}</strong>{% for reason in task.reasons_display %}<span>{{ reason }}</span>{% endfor %}{% if task.probability != None %}<small>Laya: {{ task.prediction }} · probabilidad {{ task.probability|floatformat:2 }}</small>{% endif %}{% if task.reviewed_by %}<small>{{ task.reviewed_by }} · {{ task.reviewed_at|date:"d/m H:i" }}</small>{% endif %}</div>
-    <a class="button {% if task.review_status == 'pendiente' %}primary{% endif %}" href="{% url 'review:task' task.pk %}">{% if task.review_status == 'pendiente' %}Revisar{% else %}Ver decisión{% endif %}</a>
+    <a class="button {% if task.review_status == 'pendiente' %}primary{% endif %}" href="{% url 'review:task' task.pk %}">{% if task.is_dossier %}Abrir ficha{% elif task.review_status == 'pendiente' %}Revisar{% else %}Ver decisión{% endif %}</a>
   </article>
 {% empty %}<div class="empty-state"><h2>No hay casos con estos filtros</h2><p>Podés consultar otro lote o auditar los resultados automáticos.</p><a href="{% url 'review:queue' %}" class="button">Ver pendientes del último lote</a></div>{% endfor %}
 </section>
