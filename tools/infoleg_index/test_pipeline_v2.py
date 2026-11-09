@@ -16,7 +16,8 @@ from prepare_review import main as prepare
 from references import sync_references
 from enrich import classify_batch
 from topics import classify_norm_topics
-from review_documents import reparse_saved, refresh_queue
+from review_documents import reparse_saved, refresh_queue, index_result
+from text_integrity import COMPARISON_VERSION, INFOLEG_PAGE_TITLE
 
 LAW_HTML='''<!doctype html><html><head><title>InfoLEG</title></head><body>
 <h1>EXPROPIACIONES</h1><h2>Ley N° 23.600</h2>
@@ -56,6 +57,47 @@ class ContextTest(unittest.TestCase):
 
 @unittest.skipUnless(os.getenv('CRAWLER_TEST_DSN'),'requires disposable database')
 class PipelineV2Test(unittest.TestCase):
+    def test_browser_title_recheck_preserves_the_snapshot_votes_and_draft(self):
+        dsn=os.environ['CRAWLER_TEST_DSN']
+        worker.initialize(dsn)
+        with psycopg.connect(dsn) as con:
+            norm=con.execute("INSERT INTO norms(infoleg_id,norm_type,number) VALUES (900202,'Ley','999002') RETURNING id").fetchone()[0]
+            run=con.execute("INSERT INTO crawl_runs(source_id,requested_ids,status,finished_at) SELECT id,ARRAY[900202],'ok',now() FROM sources WHERE code='infoleg' RETURNING id").fetchone()[0]
+            html=f'<head><title>{INFOLEG_PAGE_TITLE}</title></head><body><h1>EXPROPIACIONES</h1><p>Artículo 1° — Inmueble A.</p></body>'
+            source=con.execute("INSERT INTO norm_sources(norm_id,crawl_run_id,url,document_kind,http_status,raw_content) VALUES (%s,%s,'https://servicios.infoleg.gob.ar/norma.htm','texto_original',200,%s) RETURNING id",(norm,run,html)).fetchone()[0]
+            text,articles=parse_articles(html)
+            legacy=INFOLEG_PAGE_TITLE+'\n'+text
+            with con.cursor() as cur:add_version(cur,norm,source,'original',legacy,articles,False)
+            result=index_result(con,run,norm)
+            version=result['documents'][0]['norm_version_id']
+            key=result['documents'][0]['integrity']['key']
+            result['documents'][0]['integrity'].pop('comparison_version')
+            result['documents'][0]['integrity'].update(status='diferencias',ignored_metadata=[],issues=['contenido_diferente'])
+            result.update(decision='revision',review_reasons=['copia_diferente'])
+            root=con.execute("INSERT INTO review_tasks(crawl_run_id,norm_id,kind,source_text,decision,fingerprint,model_result) VALUES (%s,%s,'indice',%s,'revision','header-snapshot',%s) RETURNING id",(run,norm,legacy,Jsonb(result))).fetchone()[0]
+            checks={key:{'status':'validada','scope':'document','notes':'Fuente contrastada'}}
+            con.execute("INSERT INTO norm_reviews(task_id,user_id,username,status,checks) VALUES (%s,900202,'header','validada',%s)",(root,Jsonb(checks)))
+            con.execute("INSERT INTO review_events(task_id,username,previous_status,status,notes) VALUES (%s,'header','pendiente','validada','Fuente contrastada')",(root,))
+            draft={'items':{'document':{'task_id':root,'fields':{'check':[key],'notes':['Anotación conservada']}}}}
+            con.execute('INSERT INTO review_drafts(task_id,user_id,data,revision) VALUES (%s,900202,%s,3)',(root,Jsonb(draft)))
+            # A later stored extraction must never be substituted for the reviewed snapshot.
+            later_source=con.execute("INSERT INTO norm_sources(norm_id,crawl_run_id,url,document_kind,http_status,raw_content) VALUES (%s,%s,'https://servicios.infoleg.gob.ar/norma.htm','texto_original',200,%s) RETURNING id",(norm,run,html.replace('Inmueble A','Inmueble B'))).fetchone()[0]
+            with con.cursor() as cur:add_version(cur,norm,later_source,'original',text.replace('Inmueble A','Inmueble B'),[{**articles[0],'text':articles[0]['text'].replace('Inmueble A','Inmueble B')}],False)
+            con.commit()
+            refresh_queue(con,run)
+            updated,decision=con.execute('SELECT model_result,decision FROM review_tasks WHERE id=%s',(root,)).fetchone()
+            document=updated['documents'][0]
+            self.assertEqual((document['norm_version_id'],document['source_id'],document['text']),(version,source,legacy))
+            self.assertEqual(document['integrity']['comparison_version'],COMPARISON_VERSION)
+            self.assertEqual(document['integrity']['key'],key)
+            self.assertEqual(document['integrity']['status'],'coincide')
+            self.assertEqual(decision,'aceptacion_automatica')
+            self.assertEqual(con.execute('SELECT checks FROM norm_reviews WHERE task_id=%s',(root,)).fetchone()[0],checks)
+            self.assertEqual(con.execute('SELECT data,revision FROM review_drafts WHERE task_id=%s',(root,)).fetchone(),(draft,3))
+            self.assertEqual(con.execute('SELECT count(*) FROM review_events WHERE task_id=%s',(root,)).fetchone()[0],1)
+            with patch('review_documents.check_document',side_effect=AssertionError('proof already current')):
+                refresh_queue(con,run)
+
     def test_legacy_history_and_saved_html_reprocessing(self):
         dsn=os.environ['CRAWLER_TEST_DSN']
         worker.initialize(dsn)

@@ -5,7 +5,7 @@ from pathlib import Path
 from psycopg.types.json import Jsonb
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'web' / 'review') if len(Path(__file__).resolve().parents)>2 else '/app')
-from text_integrity import POLICY, check_document
+from text_integrity import COMPARISON_VERSION, POLICY, check_document
 
 
 def reparse_saved(con, run_id, report=None):
@@ -29,7 +29,8 @@ def reparse_saved(con, run_id, report=None):
 def index_result(con, run_id, norm_id, cached=None, rebuild=False):
     cached = cached or {}
     identity = con.execute('SELECT norm_type,number,issuing_body,summary FROM norms WHERE id=%s', (norm_id,)).fetchone()
-    versions = con.execute('''SELECT DISTINCT ON (version_type) id,version_type,full_text_original,source_id
+    pinned = cached.get('copy_policy')==POLICY and not rebuild
+    versions = [(d.get('norm_version_id'),d['version'],d['text'],d.get('source_id')) for d in cached.get('documents',[])] if pinned else con.execute('''SELECT DISTINCT ON (version_type) id,version_type,full_text_original,source_id
         FROM norm_versions WHERE norm_id=%s ORDER BY version_type,id DESC''', (norm_id,)).fetchall()
     articles, documents = [], []
     old_documents = {d['version']:d for d in cached.get('documents', [])}
@@ -51,7 +52,7 @@ def index_result(con, run_id, norm_id, cached=None, rebuild=False):
                 FROM article_versions av JOIN articles a ON a.id=av.article_id WHERE av.norm_version_id=%s ORDER BY a.ordinal,av.id''', (version_id,))]
         if version in old_documents and not rebuild:
             text = old_documents[version]['text']
-        source = con.execute('''SELECT id,raw_content,http_status FROM norm_sources WHERE norm_id=%s AND crawl_run_id=%s
+        source = con.execute('SELECT id,raw_content,http_status FROM norm_sources WHERE id=%s AND norm_id=%s',(source_id,norm_id)).fetchone() if pinned and source_id else con.execute('''SELECT id,raw_content,http_status FROM norm_sources WHERE norm_id=%s AND crawl_run_id=%s
             AND document_kind=%s ORDER BY id DESC LIMIT 1''', (norm_id,run_id,'texto_original' if version=='original' else 'texto_actualizado')).fetchone()
         html = source[1] if source and source[2] and 200<=source[2]<300 else None
         proof = check_document(html,text,group,version)
@@ -71,7 +72,8 @@ def refresh_queue(con, run_id=None):
     """No votes/events/drafts are deleted or reinterpreted as full-document approvals."""
     query = "SELECT id,crawl_run_id,norm_id,model_result FROM review_tasks WHERE kind='indice'"
     for task_id, run, norm_id, cached in con.execute(query + (' AND crawl_run_id=%s' if run_id else ''), (run_id,) if run_id else ()).fetchall():
-        result = cached if cached.get('copy_policy')==POLICY else index_result(con,run,norm_id,cached)
+        current = cached.get('copy_policy')==POLICY and all(d.get('integrity',{}).get('comparison_version')==COMPARISON_VERSION for d in cached.get('documents',[]))
+        result = cached if current else index_result(con,run,norm_id,cached)
         con.execute('UPDATE review_tasks SET model_result=%s,decision=%s,reasons=%s WHERE id=%s',
                     (Jsonb(result),result['decision'],Jsonb(result['review_reasons']),task_id))
         old = con.execute("""SELECT id,model_result FROM review_tasks WHERE crawl_run_id=%s AND norm_id=%s

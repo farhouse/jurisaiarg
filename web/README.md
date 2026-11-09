@@ -100,8 +100,13 @@ obligatorias por cada artículo. La cola agrupa las dudas por norma.
 tolerando espacios; comprueba orden y contenido del articulado. Una aprobación humana
 usa una clave con versión y hashes de fuente, extracción y artículos. Puede reutilizarse
 para el mismo contenido en otro lote, pero nunca para texto cambiado. Una comprobación
-automática no se almacena como voto humano. Las aprobaciones antiguas de identidad o
-partes se conservan con su alcance original.
+automática no se almacena como voto humano. El comparador identifica el título técnico
+«InfoLEG - Ministerio de Justicia y Derechos Humanos - Argentina» cuando consta
+en `<head><title>` y quedó como prefijo de una extracción antigua. Lo excluye solo
+de la comparación, conservando texto, hashes, votos y borradores. No elimina títulos
+jurídicos ni menciones dentro de artículos. `init` actualiza las comprobaciones
+anteriores usando la fuente y versión guardadas, sin descargar ni cargar Laya.
+Las aprobaciones antiguas de identidad o partes se conservan con su alcance original.
 
 `review_drafts` guarda avance privado por usuario y raíz, con protección por revisión,
 recuperación en la pestaña y confirmación transaccional en «Resumen y finalizar».

@@ -38,6 +38,14 @@ class ParserTest(unittest.TestCase):
         self.assertEqual([a["key"] for a in articles], ["1", "2"])
         self.assertIn("Texto uno", articles[0]["text"])
 
+    def test_browser_title_is_not_extracted_but_legal_headings_are(self):
+        title='InfoLEG - Ministerio de Justicia y Derechos Humanos - Argentina'
+        html=f'<html><head><title>{title}</title></head><body><h1>EXPROPIACIONES</h1><h2>Ley 23600</h2><p>Artículo 1° — La denominación es {title}.</p></body></html>'
+        text,articles=parse_articles(html)
+        self.assertTrue(text.startswith('EXPROPIACIONES\nLey 23600'))
+        self.assertEqual(text.count(title),1)
+        self.assertIn(title,articles[0]['text'])
+
     def test_relations(self):
         html = """
         <table><tr><td><a href="/infolegInternet/verNorma.do?id=77206">Ley 21659</a>
