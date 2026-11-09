@@ -547,7 +547,10 @@ class WorkflowTest(TransactionTestCase):
         self.assertEqual((topic.review_status, topic.proposed_correction), ('pendiente', {}))
         self.assertEqual(self.client.get(url).context['form'].initial['add_concepts'], 'Dominio')
         final = f'/validar/{index.pk}/finalizar/'
-        self.assertEqual(self.client.post(final, {'draft_revision':2}, HTTP_X_REVIEW_ASYNC='1').status_code, 400)
+        failure=self.client.post(final, {'draft_revision':2}, HTTP_X_REVIEW_ASYNC='1')
+        self.assertEqual(failure.status_code,400)
+        self.assertEqual(failure.json()['errors'][0]['field'],'status')
+        self.assertIn('#id_status_0',failure.json()['errors'][0]['url'])
         self.assertFalse(ReviewEvent.objects.filter(task__in=[topic,index]).exists())
         self.assertFalse(NormReview.objects.filter(task=index).exists())
         # Incomplete corrections can be saved, then completed without a full-page post.
@@ -643,3 +646,58 @@ class WorkflowTest(TransactionTestCase):
         root.model_result=altered;root.decision='revision';root.save()
         self.assertEqual(self.client.get(f'/validar/?run={run.pk}&scope=queue').context['page'].paginator.count,1)
         vote.refresh_from_db();self.assertEqual(vote.status,'validada')  # The older scoped approval remains intact.
+
+    def test_zzzzzzzz_finalize_errors_explain_and_link_to_the_required_field(self):
+        from .text_integrity import POLICY, check_document
+        user=User.objects.create_user('error-reviewer',is_staff=True)
+        self.client.force_login(user)
+        now=timezone.now()
+        run=CrawlRun.objects.create(requested_ids=[99901],started_at=now,status='ok',processed_count=1)
+        norm=Norm.objects.create(infoleg_id=99901,norm_type='Ley',number='99901',general_status='desconocida',index_status='solo_texto_original',article_count=1)
+        html='<p>Artículo 1° — Inmueble A.</p>'
+        text='Artículo 1° — Inmueble B.'
+        source=NormSource.objects.create(norm=norm,crawl_run=run,url=norm.infoleg_url,document_kind='texto_original',retrieved_at=now,http_status=200,raw_content=html)
+        articles=[{'label':'1','text':text,'version':'original'}]
+        proof=check_document(html,text,articles)
+        root=ReviewTask.objects.create(crawl_run=run,norm=norm,kind='indice',source_text=text,decision='revision',fingerprint='field-error-root',created_at=now,model_result={'copy_policy':POLICY,'articles':articles,'documents':[{'version':'original','text':text,'source_id':source.pk,'integrity':proof}]})
+        base=f'/validar/{root.pk}/'
+        copy_url=base+'?tab=copy&version=original'
+        summary_url=base+'?tab=copy&finish=1'
+        payload={'draft':1,'draft_revision':0,'check':proof['key'],'revision':0,'status':'validada','notes':''}
+        self.assertEqual(self.client.post(copy_url,payload,HTTP_X_REVIEW_ASYNC='1').status_code,200)
+        summary=self.client.get(summary_url)
+        self.assertEqual(summary.context['finish_summary']['invalid_count'],1)
+        self.assertEqual(summary.context['finish_summary']['done'],0)
+        self.assertContains(summary,'Por corregir')
+        self.assertContains(summary,'Falta completar tu revisión')
+        self.assertContains(summary,'Ir a observaciones')
+        failure=self.client.post(base+'finalizar/',{'draft_revision':1},HTTP_X_REVIEW_ASYNC='1')
+        self.assertEqual(failure.status_code,400)
+        details=failure.json()['errors']
+        self.assertEqual(details[0]['field'],'notes')
+        self.assertEqual(details[0]['label'],'Observaciones')
+        self.assertIn('Texto completo',details[0]['context'])
+        self.assertIn('Marcaste «Sí, coincide»',details[0]['message'])
+        self.assertIn('&validate=1#id_notes',details[0]['url'])
+        edit=self.client.get(details[0]['url'])
+        self.assertContains(edit,'Corregí estos campos para continuar')
+        self.assertContains(edit,'<details class="review-details" open>')
+        self.assertContains(edit,'aria-invalid="true"')
+        self.assertIn('notes',edit.context['form'].errors)
+        fallback=self.client.post(base+'finalizar/',{'draft_revision':1})
+        self.assertEqual(fallback.status_code,400)
+        self.assertContains(fallback,'Ir a observaciones',status_code=400)
+        self.assertFalse(ReviewEvent.objects.filter(task=root).exists())
+        self.assertFalse(NormReview.objects.filter(task=root).exists())
+        draft=ReviewDraft.objects.get(task=root,user_id=user.pk)
+        self.assertEqual(draft.revision,1)
+        self.assertEqual(next(iter(draft.data['items'].values()))['fields']['status'],['validada'])
+        payload.update(draft_revision=1,notes='Explicación de prueba: se contrastó la diferencia señalada.')
+        self.assertEqual(self.client.post(copy_url,payload,HTTP_X_REVIEW_ASYNC='1').status_code,200)
+        ready=self.client.get(summary_url)
+        self.assertEqual(ready.context['finish_summary']['invalid_count'],0)
+        self.assertEqual(ready.context['finish_summary']['done'],1)
+        self.assertNotContains(ready,'Falta completar tu revisión')
+        self.assertEqual(self.client.post(base+'finalizar/',{'draft_revision':2}).status_code,302)
+        self.assertEqual(NormReview.objects.get(task=root,user_id=user.pk).status,'validada')
+        self.assertEqual(ReviewEvent.objects.filter(task=root).count(),1)

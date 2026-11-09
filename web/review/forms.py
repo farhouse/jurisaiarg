@@ -3,6 +3,29 @@ from django import forms
 from .models import LegalChange
 
 
+def decision_errors(form, url, context=''):
+    """Use Django's actual validation errors for the summary, API and field links."""
+    labels = {'status':'Decisión', 'issues':'Problemas encontrados', 'check':'Control de la copia',
+              'revision':'Versión de la revisión', 'proposal_kind':'Propuesta',
+              'keep_matters':'Materias jurídicas', 'keep_concepts':'Conceptos para la búsqueda',
+              'amending_reference':'Norma de origen', 'amending_article':'Artículo de origen',
+              'affected_reference':'Norma referida', 'affected_article':'Artículo referido',
+              'change_type':'Tipo de relación', 'scope':'Alcance', 'scope_detail':'Inciso o párrafo exacto'}
+    errors=[]
+    for name, messages in form.errors.items():
+        field=form[name] if name in form.fields else None
+        target='case-decision'
+        if field and not field.is_hidden:
+            target=field.auto_id
+            if isinstance(field.field.widget,(forms.RadioSelect,forms.CheckboxSelectMultiple)):
+                target=next((widget.id_for_label for widget in field),target)
+        label=labels.get(name,field.label if field else 'Revisión')
+        for message in messages:
+            errors.append({'field':name,'label':label,'message':str(message),'context':context,
+                           'url':url+'&validate=1#'+target})
+    return errors
+
+
 class ReviewForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

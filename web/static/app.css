@@ -396,3 +396,14 @@ tbody th { font-weight:650; }.table-empty { padding:30px 12px; color:var(--muted
 .article-contexts { padding-left:20px; font-size:14px; }.article-contexts li { margin-bottom:12px; }
 .copy-decision .review-actions { justify-content:stretch; grid-template-columns:minmax(0,1fr); }
 @media(max-width:850px) { .dossier-layout { grid-template-columns:minmax(0,1fr); gap:24px; }.dossier-heading { align-items:start; flex-direction:column; }.dossier-issues li { align-items:start; flex-direction:column; }.dossier-text-body { padding:18px; max-height:540px; } }
+
+/* Errores de revisión: motivo visible y acceso directo al campo. */
+.review-errors { margin:24px 0; padding:22px 24px; border:1px solid var(--red); border-radius:8px; background:#fff4f2; color:#652c27; font-size:16px; line-height:1.6; overflow-wrap:anywhere; scroll-margin-block:24px; }
+.review-errors h2,.review-errors h3 { margin:0 0 10px; font:700 22px/1.3 ui-serif,Georgia,serif; color:#652c27; }
+.review-errors p { margin:8px 0 12px; max-width:75ch; }
+.review-errors ul { margin:0; padding-left:22px; }.review-errors li { padding:12px 0; }.review-errors li + li { border-top:1px solid #dcb5af; }
+.review-errors a { color:#652c27; font-weight:700; text-underline-offset:3px; }.review-errors .button { border-color:#ba8c85; }
+.review-errors:focus { outline:2px solid var(--red); outline-offset:3px; }
+#case-decision [aria-invalid="true"],#case-decision .review-field-target { border-color:var(--red); outline:2px solid var(--red); outline-offset:3px; background:#fff8f6; scroll-margin-block:100px; }
+#case-decision .errorlist,#case-decision .field-error { font-size:16px; line-height:1.5; }
+@media(max-width:650px) { .review-errors { padding:18px; }.copy-check-list li { grid-template-columns:minmax(0,1fr) auto; }.copy-check-list li > a { grid-column:1 / -1; } }

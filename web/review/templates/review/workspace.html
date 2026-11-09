@@ -6,6 +6,7 @@
 <section class="norm-review-section" aria-label="{{ active_tab.label }}">
 {% if dossier %}{% include 'review/dossier.html' %}{% elif finish_summary %}{% include 'review/finish_summary.html' %}{% elif task %}
 {% if conflict_revision != None %}<aside class="review-conflict notice" role="alert"><strong>Este caso cambió mientras lo revisabas.</strong><p>Último resultado confirmado: {{ conflict_status }}. {{ conflict_notes }}</p>{% if passage.changes %}<p>Correcciones confirmadas: {{ passage.changes|join:'; ' }}</p>{% endif %}<p>Tu borrador se conserva abajo. Compará los cambios antes de continuar.</p><button class="button" type="button" data-rebase="{{ conflict_revision }}">Conservar mi borrador sobre la revisión actual</button></aside>{% endif %}
+{% include 'review/decision_errors.html' %}
 {% if task.kind == 'indice' %}
 {% if copy.document_mode %}{% include 'review/copy_document.html' %}{% else %}{% include 'review/copy_task.html' %}{% endif %}
 {% else %}

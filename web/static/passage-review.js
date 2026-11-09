@@ -10,6 +10,7 @@ function enhancePassageReview() {
     const input = document.createElement('input');
     input.type = 'text'; input.id = field.id + '-entry'; input.placeholder = 'Escribí una etiqueta';
     input.setAttribute('aria-label', group.querySelector('label').textContent);
+    if (field.getAttribute('aria-invalid') === 'true') input.setAttribute('aria-invalid','true');
     const add = document.createElement('button');
     add.type = 'button'; add.className = 'button'; add.textContent = 'Proponer agregar';
     const entry = document.createElement('div'); entry.className = 'tag-entry'; entry.append(input, add);

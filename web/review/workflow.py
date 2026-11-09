@@ -14,7 +14,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_safe
 
-from .forms import DecisionForm
+from .forms import DecisionForm, decision_errors
 from .models import CrawlJob, CrawlRun, LegalChange, NormReview, ReviewDraft, ReviewEvent, ReviewTask, NormReference
 from . import copy_review, passage_review, draft_review, dossier
 
@@ -53,7 +53,7 @@ class CopyDecisionForm(DecisionForm):
         data = super().clean()
         if data.get('status') == 'validada':
             if self.control.get('scope')=='document' and self.control['proof']['status']=='diferencias' and not data.get('notes'):
-                self.add_error('notes','El control automático encontró diferencias. Explicá por qué la copia completa es correcta o señalá el problema.')
+                self.add_error('notes','Marcaste «Sí, coincide», pero el control automático encontró diferencias. En «Observaciones», explicá por qué la copia es correcta. Si hay un error en la copia, elegí «Hay diferencias» e indicá cuál.')
             if not self.control['source']:
                 self.add_error('status', 'Falta la fuente de este lote. Dejá pendiente este control hasta poder compararlo.')
             if data.get('issues'):
@@ -377,6 +377,7 @@ def task_detail(request, pk):
             code = 400
     articles = copy_review.articles_for(task) if task.kind == 'indice' else []
     context.update(task=task, form=form, articles=articles,
+                   decision_errors=decision_errors(form,current['url']),
                    copy=copy, passage=passage, snapshot='articles' in task.model_result, history=task.events.order_by('-id')[:10])
     return render(request, 'review/task.html', context, status=code)
 

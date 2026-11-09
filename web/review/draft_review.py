@@ -6,9 +6,11 @@ from django import forms
 from django.db import transaction
 from django.http import Http404, JsonResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 
 from . import copy_review, passage_review
+from .forms import decision_errors
 from .models import NormReview, ReviewDraft, ReviewTask
 
 
@@ -28,6 +30,22 @@ def overlay(form, item):
         for name, field in form.fields.items():
             values = item['fields'].get(name, [])
             form.initial[name] = values if isinstance(field, forms.MultipleChoiceField) else (values[0] if values else '')
+
+
+def item_form(task, item, root_id, user):
+    from .workflow import CopyDecisionForm, review_url
+    data=fields_data(item['fields'])
+    data['status']=data.get('status') or 'pendiente'
+    query=QueryDict(urlencode(item['query']),mutable=True)
+    query['case']=str(task.pk)
+    url=review_url(root_id,query['tab'],task.pk)
+    request=SimpleNamespace(GET=query,user=user)
+    vote=NormReview.objects.filter(task=task,user_id=user.pk).first() if task.kind=='indice' else None
+    copy=copy_review.copy_context(task,vote,request,url) if task.kind=='indice' else None
+    passage=passage_review.passage_context(task,request,url) if task.kind=='pasaje' else None
+    control=copy['control'] if copy else None
+    form=CopyDecisionForm(data,control=control) if control else passage_review.proposal_form(task,data,{})
+    return form,copy,passage,control,reverse('review:task',args=[root_id])+'?'+query.urlencode()
 
 
 def preview(copy, task, draft):
@@ -105,32 +123,40 @@ def summary(entry, root_id, user, draft):
                 copy = copy_review.copy_context(task, vote, SimpleNamespace(GET=QueryDict()), case['url'])
                 for check in copy['checks']:
                     item = items.get(key(task, check))
-                    rows.append({'label': check['label'], 'section': tab['label'], 'url': check['url'],
+                    rows.append({'item_key':key(task,check),'label': check['label'], 'section': tab['label'], 'url': check['url'],
                                  'status': (item['fields'].get('status') or ['pendiente'])[0] or 'pendiente' if item else check['status'], 'automatic':check.get('proof',{}).get('status')=='coincide','draft': bool(item)})
             else:
                 item = items.get(key(task))
                 if not item and (task.decision != 'revision' or task.model_result.get('requires_processing')):
                     continue
-                rows.append({'label': ('Propuesta temática de la norma' if task.model_result.get('scope')=='norma' else ('Artículo ' + case['article'] + ' · ' if case['article'] else '') + 'Relación propuesta'),
+                rows.append({'item_key':key(task),'label': ('Propuesta temática de la norma' if task.model_result.get('scope')=='norma' else ('Artículo ' + case['article'] + ' · ' if case['article'] else '') + 'Relación propuesta'),
                              'section': tab['label'], 'url': case['url'],
                              'status': (item['fields'].get('status') or ['pendiente'])[0] or 'pendiente' if item else task.review_status, 'draft': bool(item)})
     labels = copy_review.STATUS_LABELS
     rows=[row for row in rows if row.get('draft') or not row.get('automatic')]
     for row in rows:
+        item=items.get(row['item_key'])
+        if item:
+            form,_,_,_,url=item_form(tasks[item['task_id']],item,root_id,user)
+            row['errors']=decision_errors(form,url,row['label'])
+    for row in rows:
         row['status_label'] = labels[row['status']]
-    return {'rows': rows, 'total': len(rows), 'done': sum(r['status'] != 'pendiente' for r in rows),
+    return {'rows': rows, 'total': len(rows), 'done': sum(r['status'] != 'pendiente' and not r.get('errors') for r in rows),
             'differences': sum(r['status'] == 'rechazada' for r in rows),
-            'pending': sum(r['status'] == 'pendiente' for r in rows)}
+            'pending': sum(r['status'] == 'pendiente' for r in rows),
+            'invalid_count':sum(bool(r.get('errors')) for r in rows),
+            'errors':[error for row in rows for error in row.get('errors',[])]}
 
 
 def finalize(request, pk):
-    from .workflow import CopyDecisionForm, norm_sections, record_decision, review_url
+    from .workflow import norm_sections, record_decision, review_url
     if request.method != 'POST':
         return JsonResponse({'error': 'Se requiere confirmar la revisión.'}, status=405)
     entry = get_object_or_404(ReviewTask.objects.select_related('norm', 'crawl_run'), pk=pk)
     root_id, tabs = norm_sections(entry, request.user)
     allowed = {case['id'] for tab in tabs.values() for case in tab['cases']}
     error = None
+    errors = []
     error_url = review_url(root_id, 'copy') + '&finish=1'
     with transaction.atomic():
         ReviewTask.objects.select_for_update().get(pk=root_id)
@@ -149,23 +175,17 @@ def finalize(request, pk):
                 task = tasks.get(item['task_id'])
                 if not task:
                     raise Http404
-                data = fields_data(item['fields'])
-                data['status'] = data.get('status') or 'pendiente'
                 vote = NormReview.objects.filter(task=task, user_id=request.user.pk).first() if task.kind == 'indice' else None
                 revision = (vote.revision if vote else 0) if task.kind == 'indice' else task.revision
-                query = QueryDict(urlencode(item['query']))
-                url = review_url(root_id, item['query']['tab'], task.pk)
-                copy = copy_review.copy_context(task, vote, SimpleNamespace(GET=query), url) if task.kind == 'indice' else None
-                passage = passage_review.passage_context(task, SimpleNamespace(GET=query), url) if task.kind == 'pasaje' else None
-                control = copy['control'] if copy else None
-                form = CopyDecisionForm(data, control=control) if control else passage_review.proposal_form(task, data, {})
+                form,copy,passage,control,url=item_form(task,item,root_id,request.user)
                 if not form.is_valid():
-                    error = ('Hay una decisión incompleta o contradictoria. Corregila antes de finalizar.', 400)
-                    error_url = url + '&' + query.urlencode() + '&validate=1'
+                    error = ('Completá los campos señalados antes de finalizar.', 400)
+                    errors=decision_errors(form,url,control['label'] if control else 'Propuesta temática' if passage['topics'] else 'Relación entre normas')
+                    error_url = errors[0]['url']
                     break
                 if form.cleaned_data['revision'] != revision:
                     error = ('Un caso cambió desde que empezaste. Revisá el resultado actualizado antes de finalizar.', 409)
-                    error_url = url + '&' + query.urlencode() + '&validate=1'
+                    error_url = url + '&validate=1'
                     break
                 prepared.append((task, form, copy, passage, control))
             if not error:
@@ -179,6 +199,6 @@ def finalize(request, pk):
                 draft.save(update_fields=['data', 'revision', 'updated_at'])
     if error:
         if request.headers.get('X-Review-Async'):
-            return JsonResponse({'error': error[0], 'url': error_url}, status=error[1])
-        return render(request, 'review/finalize_error.html', {'error': error[0], 'url': error_url}, status=error[1])
+            return JsonResponse({'error': error[0], 'url': error_url, 'errors':errors}, status=error[1])
+        return render(request, 'review/finalize_error.html', {'error': error[0], 'url': error_url, 'errors':errors}, status=error[1])
     return redirect(review_url(root_id, 'copy') + '&finish=1&confirmed=1')

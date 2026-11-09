@@ -105,7 +105,7 @@ partes se conservan con su alcance original.
 
 `review_drafts` guarda avance privado por usuario y raíz, con protección por revisión,
 recuperación en la pestaña y confirmación transaccional en «Resumen y finalizar».
-Los resultados automáticos no trabajados no se exigen en el resumen. Las correcciones
+Los resultados automáticos no trabajados no se exigen en el resumen. El resumen valida cada borrador antes de habilitar la confirmación: identifica las decisiones por corregir y enlaza el campo exacto. Los errores al finalizar conservan el motivo de Django; al abrir el enlace se despliega y enfoca el campo, tanto en la navegación continua como sin JavaScript. Las correcciones
 se guardan separadas del modelo y no reemplazan el texto ni entrenan al clasificador.
 
 `norm_references` conserva la dirección, evidencia, versión, artículo y resolución de

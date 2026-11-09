@@ -58,13 +58,29 @@
     // Preserve raw typing before the debounced request, including tag entry fields.
     backup(); clearTimeout(timer); timer = setTimeout(save, 700);
   };
-  const mount = () => {
+  const focusReviewError = (hash = location.hash) => {
+    let target;
+    try { target = hash && document.getElementById(decodeURIComponent(hash.slice(1))); } catch { /* Ignore malformed anchors. */ }
+    if (target && workspace.contains(target)) {
+      if (target.hidden) target = target.closest('[data-tag-editor]')?.querySelector('.tag-entry input') || target;
+      for (let parent = target.parentElement; parent && parent !== workspace; parent = parent.parentElement) {
+        if (parent.tagName === 'DETAILS') parent.open = true;
+      }
+      target.classList.add('review-field-target');
+    } else target = workspace.querySelector('[data-decision-errors]');
+    if (!target || needsRecovery) return false;
+    if (!target.matches('input,textarea,select,button,a')) target.tabIndex = -1;
+    target.focus({preventScroll:true}); target.scrollIntoView({block:'center'});
+    return true;
+  };
+  const mount = (hash = location.hash) => {
     document.dispatchEvent(new Event('review:mounted'));
     const current = form();
     if (current) {
       const details = current.querySelector('.review-details');
       const updateDetails = () => {
-        if (current.querySelector('[name=status]:checked')?.value === 'rechazada' || current.elements.notes.value || current.querySelector('[name=issues]:checked')) details.open = true;
+        const status = current.querySelector('[name=status]:checked')?.value;
+        if (status === 'rechazada' || current.elements.notes.value || current.querySelector('[name=issues]:checked') || current.dataset.requiresExplanation === 'true' && status === 'validada') details.open = true;
       };
       current.addEventListener('input', changed); current.addEventListener('change', () => { updateDetails(); changed(); });
       current.addEventListener('submit', event => { event.preventDefault(); dirty = true; save(); });
@@ -116,18 +132,34 @@
     if (finalForm) finalForm.addEventListener('submit', async event => {
       event.preventDefault();
       const button = finalForm.querySelector('button'), errorBox = finalForm.querySelector('[data-finalize-error]');
+      const showError = result => {
+        const heading = document.createElement('h3'); heading.textContent = 'No se pudo finalizar la revisión';
+        const reason = document.createElement('p'); reason.textContent = result.error;
+        errorBox.replaceChildren(heading, reason);
+        if (result.errors?.length) {
+          const list = document.createElement('ul');
+          for (const error of result.errors) {
+            const item = document.createElement('li'), label = document.createElement('strong'), message = document.createElement('p'), link = document.createElement('a');
+            label.textContent = `${error.context} · ${error.label}`; message.textContent = error.message;
+            link.href = error.url; link.className = 'button'; link.textContent = `Ir a ${error.label.toLowerCase()}`;
+            item.append(label, message, link); list.append(item);
+          }
+          errorBox.append(list);
+        } else if (result.url) {
+          const link = document.createElement('a'); link.href = result.url; link.className = 'button'; link.textContent = 'Volver a revisar'; errorBox.append(link);
+        }
+        errorBox.hidden = false; errorBox.focus({preventScroll:true}); errorBox.scrollIntoView({block:'center'});
+      };
       button.disabled = true; button.textContent = 'Registrando revisión…'; errorBox.hidden = true;
       try {
         const response = await fetch(finalForm.action, {method:'POST', body: new FormData(finalForm), headers:{'X-Review-Async':'1'}, signal:AbortSignal.timeout(15000), credentials:'same-origin'});
         if (!response.ok) {
-          const result = await response.json();
-          errorBox.textContent = result.error;
-          if (result.url) { const link = document.createElement('a'); link.href = result.url; link.textContent = ' Revisar el caso'; errorBox.append(link); }
-          errorBox.hidden = false;
+          showError(await response.json());
         } else await navigate(response.url);
-      } catch { errorBox.textContent = 'No se pudo confirmar. El borrador se conserva; reintentá.'; errorBox.hidden = false; }
+      } catch { showError({error:'No pudimos confirmar el resultado. Revisá la conexión y volvé al resumen antes de reintentar.',url:mountedURL}); }
       finally { button.disabled = false; button.textContent = 'Finalizar revisión de esta norma'; }
     });
+    focusReviewError(hash);
   };
   const navigate = async (href, push = true) => {
     if (navigating) return false;
@@ -141,13 +173,13 @@
       const next = documentResult.querySelector('#review-workspace');
       if (!next) throw new Error('La sesión pudo haber vencido. Volvé a ingresar para continuar.');
       workspace.replaceChildren(...next.childNodes);
-      mountedURL = response.url;
+      mountedURL = response.url + new URL(href,location.href).hash;
       if (push) history.pushState({}, '', mountedURL);
       document.title = documentResult.title;
-      mount();
+      mount(new URL(mountedURL).hash);
       workspace.inert = false;
       const heading = workspace.querySelector('.copy-work-heading h2, .copy-summary h2');
-      if (heading) { heading.tabIndex = -1; heading.focus({preventScroll:true}); }
+      if (heading && !focusReviewError(new URL(mountedURL).hash)) { heading.tabIndex = -1; heading.focus({preventScroll:true}); }
       return true;
     } catch (error) { state(error.message, true); return false; }
     finally { navigating = false; workspace.inert = false; workspace.removeAttribute('aria-busy'); }
