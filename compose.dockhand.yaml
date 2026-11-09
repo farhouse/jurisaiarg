@@ -50,6 +50,7 @@ services:
       DJANGO_CSRF_TRUSTED_ORIGINS: "${DJANGO_CSRF_TRUSTED_ORIGINS:-}"
       DJANGO_TRUST_PROXY_HEADERS: "${DJANGO_TRUST_PROXY_HEADERS:-false}"
       DJANGO_SECURE_COOKIES: "${DJANGO_SECURE_COOKIES:-false}"
+      JURISAI_PILOT_MODEL: "${JURISAI_PILOT_MODEL:-nvidia/nemotron-3.5-super-vl:free}"
     volumes:
       - juris_ai_models:/models
     ports:
@@ -67,7 +68,10 @@ services:
     init: true
     volumes:
       - juris_ai_models:/models
-    environment: *database-environment
+    environment:
+      <<: *database-environment
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      JURISAI_PILOT_MODEL: "${JURISAI_PILOT_MODEL:-nvidia/nemotron-3.5-super-vl:free}"
     depends_on:
       init:
         condition: service_completed_successfully

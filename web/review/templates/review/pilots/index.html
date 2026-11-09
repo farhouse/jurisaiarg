@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block title %}Pilotos híbridos · JurisAI{% endblock %}
+{% block content %}
+<a class="back" href="{% url 'review:management' %}">Volver a Gestión</a>
+<header class="work-heading"><div><h1>Pilotos híbridos</h1><p>Compará parser, Laya y una LLM sobre las fuentes que ya descargaste.</p></div></header>
+<section class="panel">
+  <h2>Preparar una muestra</h2>
+  <p>Seleccionaremos hasta 30 normas del lote, con distintas longitudes y referencias. Primero revisás la respuesta esperada; después se consulta OpenRouter.</p>
+  <form method="post">{% csrf_token %}{{ form.as_p }}<button class="button primary">Preparar muestra del lote</button></form>
+  <p class="muted">Las propuestas y decisiones de este experimento tienen su propio historial. El acceso está limitado a administradores.</p>
+</section>
+<section class="panel table-panel"><h2>Pilotos preparados</h2><div class="table-scroll"><table>
+  <thead><tr><th>Piloto y lote</th><th>Estado</th><th>Creado</th></tr></thead><tbody>
+  {% for pilot in pilots %}<tr><td><a href="{% url 'review:pilot_detail' pilot.pk %}">Piloto {{ pilot.pk }} · {{ pilot.crawl_run.label }}</a></td><td>{{ pilot.status_label }}</td><td>{{ pilot.created_at|date:'d/m/Y H:i' }}</td></tr>
+  {% empty %}<tr><td colspan="3">Todavía no hay pilotos. Elegí un lote descargado para comenzar.</td></tr>{% endfor %}
+  </tbody></table></div></section>
+{% endblock %}

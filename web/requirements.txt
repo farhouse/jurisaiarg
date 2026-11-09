@@ -4,3 +4,4 @@ psycopg[binary]>=3.2,<4
 whitenoise>=6.9,<7
 transformers==4.57.6
 numpy==1.26.4
+jsonschema>=4.23,<5

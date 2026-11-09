@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import crawler, validators, views, workflow, draft_review
+from . import crawler, validators, views, workflow, draft_review, pilots
 
 
 app_name = "review"
@@ -14,6 +14,12 @@ urlpatterns = [
     path("validar/<int:pk>/finalizar/", workflow.validator_required(draft_review.finalize), name="finalize"),
     path("validar/<int:pk>/fuente/<int:source_id>/", workflow.copy_source, name="copy_source"),
     path("gestion/", workflow.management, name="management"),
+    path('gestion/pilotos/', pilots.index, name='pilots'),
+    path('gestion/pilotos/<int:pk>/', pilots.detail, name='pilot_detail'),
+    path('gestion/pilotos/<int:pk>/exportar/', pilots.export, name='pilot_export'),
+    path('gestion/pilotos/<int:pk>/normas/<int:item_id>/', pilots.item_detail, name='pilot_item'),
+    path('gestion/pilotos/<int:pk>/normas/<int:item_id>/evaluar/', pilots.evaluate, name='pilot_evaluate'),
+    path('gestion/pilotos/<int:pk>/normas/<int:item_id>/fuente/', pilots.source, name='pilot_source'),
     path("gestion/validadores/", validators.index, name="validators"),
     path("gestion/validadores/nuevo/", validators.create, name="validator_create"),
     path("gestion/validadores/<int:pk>/", validators.detail, name="validator_detail"),

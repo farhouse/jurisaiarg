@@ -11,3 +11,7 @@ web/staticfiles/
 web/.local-access.json
 web/.preview/
 .impeccable/review/
+.env
+.env.*
+!.env.example
+!**/.env.example

@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+{% block title %}Piloto {{ pilot.pk }} · JurisAI{% endblock %}
+{% block extra_head %}{% if pilot.job.active %}<meta http-equiv="refresh" content="10">{% endif %}{% endblock %}
+{% block content %}
+<a class="back" href="{% url 'review:pilots' %}">Volver a Pilotos</a>
+<header class="work-heading"><div><h1>Piloto {{ pilot.pk }}</h1><p>{{ pilot.crawl_run.label }} · {{ pilot.status_label }}</p></div><a class="button" href="{% url 'review:pilot_export' pilot.pk %}">Exportar muestra y resultados</a></header>
+{% if error %}<div class="review-errors" role="alert"><h2>No se pudo iniciar el análisis</h2><p>{{ error }}</p></div>{% endif %}
+<section class="panel">
+  <h2>{{ pilot.job.get_stage_display }}</h2>
+  <p>{{ pilot.job.progress.activity.message }}{% if pilot.job.progress.activity.document %} · {{ pilot.job.progress.activity.document }}{% endif %}</p>
+  {% if pilot.job.progress.activity.file %}<p>Archivo: {{ pilot.job.progress.activity.file }} · {{ pilot.job.progress.activity.files_done }} de {{ pilot.job.progress.activity.files_total }} archivos completados.</p>{% endif %}
+  {% if pilot.job.active %}<p>Estado del trabajo: {{ pilot.job.get_status_display }}. Esta página se actualiza cada 10 segundos.</p>{% endif %}
+  {% if heartbeat_age != None %}<p class="muted">Última señal del trabajador: hace {{ heartbeat_age }} s. Última actividad: hace {{ activity_age }} s.</p>{% if pilot.job.active and heartbeat_age >= 60 %}<p role="status">Hace más de un minuto que no recibimos señal. Comprobá el contenedor crawler.</p>{% endif %}{% endif %}
+  {% if pilot.job.error %}<div class="review-errors" role="alert"><h3>El piloto necesita atención</h3><p>{{ pilot.job.error }}</p><p>Los resultados guardados se conservan. Corregí la configuración o esperá a que vuelva el cupo y retomá.</p></div>{% endif %}
+  {% if pilot.status == 'reference' %}
+    <p>Revisá los cinco bloques de referencia de cada norma. Podés corregirlos o señalar qué necesita criterio jurídico. Al iniciar el análisis, la referencia queda congelada.</p>
+    <form method="post">{% csrf_token %}<input type="hidden" name="action" value="analyze"><button class="button primary">Congelar referencia e iniciar análisis</button></form>
+  {% elif pilot.status == 'waiting' %}<form method="post">{% csrf_token %}<input type="hidden" name="action" value="resume"><button class="button primary">Retomar piloto</button></form>{% endif %}
+  <p class="muted">Modelo fijo: {{ pilot.model }}. Solo endpoints gratuitos compatibles; no hay cambio automático a pago.</p>
+</section>
+{% if items %}
+<section class="panel table-panel"><h2>Normas de la muestra</h2>
+<p>{{ pilot.coverage.selected }} seleccionadas de {{ pilot.coverage.eligible }} elegibles · {{ pilot.coverage.with_references }} con referencias · {{ pilot.coverage.updated }} con texto actualizado.</p>
+<div class="table-scroll"><table><thead><tr><th>Norma</th><th>Grupo</th><th>Referencia revisada</th><th>Resultado</th><th>Tu evaluación</th></tr></thead><tbody>
+{% for item in items %}<tr><td><a href="{% url 'review:pilot_item' pilot.pk item.pk %}">{{ item.snapshot.identity.type }} {{ item.snapshot.identity.number }} · InfoLEG {{ item.snapshot.identity.infoleg_id }}</a><small>{{ item.snapshot.identity.title|truncatechars:70 }}</small></td><td>{% if item.split == 'holdout' %}Evaluación reservada{% else %}Ajuste de instrucciones{% endif %}</td><td>{{ item.reference_done }}/5</td><td>{% if item.status == 'done' %}Ficha disponible{% elif item.error %}Requiere atención{% else %}Pendiente{% endif %}</td><td>{{ item.result_done }}/5</td></tr>{% endfor %}
+</tbody></table></div></section>
+<section class="panel"><h2>Informe del piloto</h2>
+<p>{{ completed }} fichas terminadas · {{ errors }} con error · {{ requests }} solicitudes registradas · {{ tokens }} tokens informados · {{ seconds }} s de inferencia.</p>
+<p>Coste informado: {% if reported_cost != None %}USD {{ reported_cost }}{% else %}el servicio no lo informó{% endif %}. Tiempo de edición registrado: {{ editing_seconds }} s; no incluye toda la lectura de la fuente.</p>
+<p>Decisiones vigentes por persona y bloque: {{ totals.confirmed }} confirmadas, {{ totals.corrected }} corregidas, {{ totals.legal }} con dudas jurídicas. Las decisiones todavía no registradas no cuentan como aciertos.</p>
+<div class="table-scroll"><table><thead><tr><th>Tarea de la LLM</th><th>Confirmada</th><th>Corregida</th><th>Duda jurídica</th></tr></thead><tbody>{% for key, counts in by_block.items %}<tr><th>{{ counts.label }}</th><td>{{ counts.confirmed }}</td><td>{{ counts.corrected }}</td><td>{{ counts.legal }}</td></tr>{% endfor %}</tbody></table></div>
+<div class="table-scroll"><table><thead><tr><th>Comparación con referencia</th><th>Normas coincidentes</th><th>Normas con diferencias</th><th>Elementos sobrantes</th><th>Elementos omitidos</th><th>Sin referencia evaluable</th></tr></thead><tbody>
+{% for block, counts in comparison.items %}<tr><th>{% if block == 'matters' %}Materias y principalidad{% elif block == 'concepts' %}Conceptos y función{% else %}Relaciones y alcance{% endif %}</th><td>{{ counts.same }}</td><td>{{ counts.different }}</td><td>{{ counts.extra }}</td><td>{{ counts.missing }}</td><td>{{ counts.unavailable }}</td></tr>{% endfor %}
+</tbody></table></div>
+<p class="muted">La coincidencia de etiquetas no mide la calidad del resumen ni demuestra exactitud jurídica. No se habilitan aprobaciones automáticas con esta muestra.</p>
+<details><summary>Resultados por grupo</summary>{% for split, counts in by_split.items %}<p>{% if split == 'holdout' %}Evaluación reservada{% else %}Ajuste{% endif %}: {{ counts.confirmed }} confirmados · {{ counts.corrected }} corregidos · {{ counts.legal }} dudas jurídicas.</p>{% endfor %}</details>
+<h3>Laya por tarea</h3><p>Efectos en pasajes con referencia revisada: {{ laya_metrics.correct }} coincidencias, {{ laya_metrics.different }} diferencias y {{ laya_metrics.incomplete }} entradas incompletas. Materias del modelo: {{ laya_metrics.topics_same }} normas con etiquetas coincidentes y {{ laya_metrics.topics_different }} con diferencias; se excluyen las etiquetas agregadas solo por vocabulario.</p>
+<h3>Recomendación exploratoria</h3>
+{% if laya_metrics.correct or laya_metrics.different %}<p>{% if laya_metrics.different %}Laya presenta diferencias en efectos: conservarlo como señal auxiliar y revisar los casos antes de ampliar su responsabilidad.{% else %}El contraste de efectos con Laya es candidato a seguir evaluándose. La muestra todavía no justifica aprobación automática.{% endif %}</p>{% else %}<p>Todavía no hay pasajes con referencia suficiente para decidir qué tarea delegar a Laya.</p>{% endif %}
+{% for key, counts in by_block.items %}{% if counts.confirmed or counts.corrected or counts.legal %}<p><strong>{{ counts.label }}:</strong> {% if counts.corrected or counts.legal %}mantener revisión asistida y analizar las correcciones y dudas antes de ampliar el uso.{% else %}continuar la evaluación de la propuesta automática, comprobando también el grupo reservado.{% endif %}</p>{% endif %}{% endfor %}
+</section>
+<details class="panel"><summary>Cobertura y límites de la muestra</summary>{% for limit in pilot.coverage.limitations %}<p>{{ limit }}</p>{% endfor %}<ul>{% for exclusion in pilot.coverage.excluded %}<li>InfoLEG {{ exclusion.infoleg_id }}: {{ exclusion.reason }}</li>{% empty %}<li>No se excluyeron normas por ausencia de HTML.</li>{% endfor %}</ul></details>
+{% endif %}
+{% endblock %}

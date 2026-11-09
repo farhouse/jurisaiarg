@@ -1,0 +1,26 @@
+.pilot-toolbar { display:flex; gap:1rem; flex-wrap:wrap; align-items:center; padding:1rem 0; border-block:1px solid var(--line,#d7ded8); }
+.pilot-toolbar span { flex:1; }
+.pilot-workspace { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:2rem; align-items:start; margin-block:1.5rem; }
+.pilot-source { position:sticky; top:1rem; max-height:calc(100vh - 2rem); overflow:auto; margin:0; }
+.pilot-source iframe { width:100%; height:55vh; border:1px solid #c9d4cc; background:white; margin-top:1rem; }
+.pilot-source-units pre { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; line-height:1.65; }
+.pilot-source-units details { padding:.8rem 0; border-bottom:1px solid #d7ded8; scroll-margin-block:3rem; }
+.pilot-source-units .pilot-located { outline:2px solid #28614c; outline-offset:4px; }
+.pilot-proposals { min-width:0; }
+.pilot-block { padding-bottom:2rem; margin-bottom:2rem; border-bottom:1px solid #c9d4cc; }
+.pilot-block h2 { margin-top:0; }
+.pilot-fact { margin-block:1rem 1.5rem; overflow-wrap:anywhere; }
+.pilot-fact blockquote { margin:.6rem 0; padding:.6rem 1rem; border-left:1px solid #778e80; max-height:13rem; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font-size:.95rem; }
+.pilot-evaluation fieldset { min-width:0; border:0; padding:0; margin:1.2rem 0; }
+.pilot-evaluation fieldset label { display:flex; gap:.6rem; align-items:center; margin:.6rem 0; }
+.pilot-evaluation input[type=radio], .pilot-evaluation input[type=checkbox] { width:auto; }
+.pilot-correction { margin-block:1rem; }
+.pilot-field { margin-block:1rem; }
+.pilot-field label { display:block; margin-bottom:.4rem; }
+.pilot-field input, .pilot-field textarea, .pilot-field select { max-width:100%; }
+.pilot-form-errors { border:1px solid #a94332; border-radius:8px; background:#fff1ed; color:#7d281c; padding:1rem; margin-block:1rem; }
+.pilot-form-errors[hidden] { display:none; }
+.pilot-pagination { display:flex; gap:1rem; flex-wrap:wrap; justify-content:space-between; margin-block:2rem; }
+.pilot-baseline { padding:1rem; background:#eaf0eb; border-radius:8px; }
+.pilot-block-state { display:block; margin-top:.6rem; }
+@media (max-width:850px) { .pilot-workspace { grid-template-columns:minmax(0,1fr); gap:1.5rem; } .pilot-source { position:static; max-height:none; } .pilot-source iframe { height:50vh; } .pilot-source-units { max-height:45vh; overflow:auto; } }

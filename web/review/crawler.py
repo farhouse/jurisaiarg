@@ -11,7 +11,7 @@ from .workflow import staff_required
 
 
 class CrawlForm(forms.Form):
-    mode = forms.ChoiceField(label='Qué querés hacer', choices=CrawlJob.MODES, initial='full')
+    mode = forms.ChoiceField(label='Qué querés hacer', choices=[c for c in CrawlJob.MODES if c[0] != 'pilot'], initial='full')
     run = forms.ModelChoiceField(label='Lote descargado', queryset=CrawlRun.objects.none(), required=False)
     start_id = forms.IntegerField(label="Desde el índice", min_value=1, max_value=2147483647, required=False)
     end_id = forms.IntegerField(label="Hasta el índice", min_value=1, max_value=2147483647, required=False)
@@ -67,7 +67,7 @@ def jobs(request):
     last_id = Norm.objects.exclude(infoleg_id=None).order_by("-infoleg_id").values_list("infoleg_id", flat=True).first()
     return render(request, "review/crawl_jobs.html", {
         "form": form, "last_id": last_id,
-        "page": Paginator(CrawlJob.objects.select_related("crawl_run"), 20).get_page(request.GET.get("page")),
+        "page": Paginator(CrawlJob.objects.exclude(mode='pilot').select_related("crawl_run"), 20).get_page(request.GET.get("page")),
     }, status=400 if request.method == "POST" else 200)
 
 
@@ -82,6 +82,8 @@ def duration(seconds):
 @require_GET
 def job_detail(request, pk):
     job = get_object_or_404(CrawlJob.objects.select_related("crawl_run"), pk=pk)
+    if job.mode == 'pilot':
+        return redirect('review:pilot_detail', pk=job.pilot.pk)
     errors = job.crawl_run.items.filter(status__in=["error_descarga", "error_parseo"]) if job.crawl_run else []
     now = timezone.now()
     end = job.finished_at or now

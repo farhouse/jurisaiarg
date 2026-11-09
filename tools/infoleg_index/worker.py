@@ -46,7 +46,7 @@ def check_health(dsn):
 
 def initialize(dsn):
     with psycopg.connect(dsn) as con:
-        for name in ('schema.sql', 'review_tasks.sql', 'crawl_jobs.sql', 'enrichment.sql'):
+        for name in ('schema.sql', 'review_tasks.sql', 'crawl_jobs.sql', 'enrichment.sql', 'pilots.sql'):
             con.execute(Path(__file__).with_name(name).read_text())
         sync_references(con)
         refresh_queue(con)
@@ -54,8 +54,10 @@ def initialize(dsn):
 
 def recover_interrupted(con):
     # Solo después de obtener el lock: ningún otro worker está ejecutando estos trabajos.
+    con.execute("""UPDATE analysis_pilots SET status='waiting' WHERE job_id IN
+        (SELECT id FROM crawl_jobs WHERE status='running' AND mode='pilot')""")
     con.execute("""UPDATE crawl_runs SET status='error', finished_at=now()
-        WHERE status='running' AND id IN (SELECT crawl_run_id FROM crawl_jobs WHERE status='running')""")
+        WHERE status='running' AND id IN (SELECT crawl_run_id FROM crawl_jobs WHERE status='running' AND mode<>'pilot')""")
     con.execute("""UPDATE crawl_jobs SET status='failed', finished_at=now(),
         error='El trabajador se interrumpió. Podés volver a solicitar el rango; los datos guardados se conservan.'
         WHERE status='running'""")
@@ -69,6 +71,8 @@ def process_next(con, dsn):
     if not job:
         con.commit()
         return False
+    if job['mode'] == 'pilot':
+        return process_pilot(con, dsn, job)
     ids = list(range(job['start_id'], job['end_id'] + 1))
     run_id = job['crawl_run_id'] if job['mode'] == 'process' else con.execute("""INSERT INTO crawl_runs(source_id,requested_ids)
         SELECT id,%s FROM sources WHERE code='infoleg' RETURNING id""", (ids,)).fetchone()[0]
@@ -119,6 +123,46 @@ def process_next(con, dsn):
         print(f"Trabajo {job['id']}: {type(exc).__name__}", flush=True)
         if not isinstance(exc, Exception):
             raise
+    return True
+
+
+def process_pilot(con, dsn, job):
+    # Rama aislada antes de crear/modificar crawl_runs o llamar a parsers con persistencia.
+    pilot_id, phase = con.execute('SELECT id,phase FROM analysis_pilots WHERE job_id=%s', (job['id'],)).fetchone()
+    con.execute("""UPDATE crawl_jobs SET status='running',started_at=now(),finished_at=NULL,
+        heartbeat_at=now(),last_activity_at=now(),error='' WHERE id=%s""", (job['id'],))
+    con.commit()
+    try:
+        with JobActivity(dsn, job['id'], heartbeat=True) as report:
+            for stage in (('prepare',) if phase == 'prepare' else ('preflight', 'laya', 'analyze')):
+                con.execute('UPDATE crawl_jobs SET stage=%s WHERE id=%s', ('pilot_' + stage, job['id']))
+                con.commit()
+                report({'prepare': 'Preparando muestra congelada', 'preflight': 'Comprobando endpoint gratuito',
+                        'laya': 'Evaluando Laya por separado', 'analyze': 'Analizando fichas con OpenRouter'}[stage])
+                child = subprocess.Popen([sys.executable, str(Path(__file__).with_name('pilot.py')),
+                                          stage, str(pilot_id), str(job['id'])], env={**os.environ,'PIPELINE_DSN':dsn})
+                try:
+                    if child.wait() != 0:
+                        raise RuntimeError('Etapa del piloto interrumpida')
+                finally:
+                    if child.poll() is None:
+                        child.terminate()
+                        try:
+                            child.wait(timeout=10)
+                        except subprocess.TimeoutExpired:
+                            child.kill()
+                            child.wait()
+        con.execute("UPDATE crawl_jobs SET status='done',stage='finished',finished_at=now() WHERE id=%s", (job['id'],))
+    except BaseException as exc:
+        con.rollback()
+        con.execute("""UPDATE crawl_jobs SET status='failed',finished_at=now(),
+            error=CASE WHEN error='' THEN 'El piloto se interrumpió. Los resultados se conservan; podés retomarlo.' ELSE error END
+            WHERE id=%s""", (job['id'],))
+        con.execute("UPDATE analysis_pilots SET status='waiting' WHERE id=%s", (pilot_id,))
+        con.commit()
+        if not isinstance(exc, Exception):
+            raise
+    con.commit()
     return True
 
 

@@ -199,7 +199,7 @@ class CrawlItem(models.Model):
 
 
 class CrawlJob(models.Model):
-    MODES = [('full', 'Descargar y procesar'), ('download', 'Solo descargar'), ('process', 'Procesar un lote descargado')]
+    MODES = [('full', 'Descargar y procesar'), ('download', 'Solo descargar'), ('process', 'Procesar un lote descargado'), ('pilot', 'Piloto híbrido aislado')]
     mode = models.TextField(default='download', choices=MODES)
     progress = models.JSONField(default=dict)
     heartbeat_at = models.DateTimeField(null=True)
@@ -217,6 +217,8 @@ class CrawlJob(models.Model):
         ("parser", "Extrayendo relaciones"), ("classify", "Clasificando materias y pasajes"),
         ("embeddings", "Preparando búsqueda semántica"), ("review", "Preparando revisión"),
         ("finished", "Etapas solicitadas terminadas"),
+        ('pilot_prepare', 'Preparando muestra congelada'), ('pilot_preflight', 'Comprobando endpoint gratuito'),
+        ('pilot_laya', 'Evaluando Laya'), ('pilot_analyze', 'Analizando con OpenRouter'),
     ])
     crawl_run = models.ForeignKey(CrawlRun, models.DO_NOTHING, null=True)
     created_at = models.DateTimeField()
@@ -389,3 +391,64 @@ class NormSource(models.Model):
     class Meta:
         managed = False
         db_table = 'norm_sources'
+
+
+class AnalysisPilot(models.Model):
+    job = models.OneToOneField(CrawlJob, models.DO_NOTHING, related_name='pilot')
+    crawl_run = models.ForeignKey(CrawlRun, models.DO_NOTHING)
+    model = models.TextField()
+    status = models.TextField(default='preparing')
+    config = models.JSONField(default=dict)
+    coverage = models.JSONField(default=dict)
+    phase = models.TextField(default='prepare')
+    created_at = models.DateTimeField()
+    reference_locked_at = models.DateTimeField(null=True)
+
+    class Meta:
+        managed = False
+        db_table = 'analysis_pilots'
+        ordering = ['-id']
+
+    @property
+    def status_label(self):
+        return {'preparing':'Preparando muestra', 'reference':'Revisar referencia esperada',
+                'running':'Analizando', 'waiting':'Requiere atención', 'complete':'Análisis terminado'}.get(self.status, self.status)
+
+
+class AnalysisPilotItem(models.Model):
+    pilot = models.ForeignKey(AnalysisPilot, models.DO_NOTHING, related_name='items')
+    norm = models.ForeignKey(Norm, models.DO_NOTHING)
+    snapshot = models.JSONField()
+    reference = models.JSONField(default=dict)
+    split = models.TextField()
+    status = models.TextField(default='pending')
+    result = models.JSONField(default=dict)
+    laya = models.JSONField(default=dict)
+    metadata = models.JSONField(default=dict)
+    error = models.TextField(default='')
+    fingerprint = models.TextField()
+
+    class Meta:
+        managed = False
+        db_table = 'analysis_pilot_items'
+        constraints = [models.UniqueConstraint(fields=['pilot','norm'], name='pilot_norm_unique')]
+        ordering = ['id']
+
+
+class AnalysisPilotEvaluation(models.Model):
+    item = models.ForeignKey(AnalysisPilotItem, models.DO_NOTHING, related_name='evaluations')
+    phase = models.TextField()
+    block = models.TextField()
+    user_id = models.BigIntegerField()
+    username = models.TextField()
+    decision = models.TextField()
+    value = models.JSONField()
+    notes = models.TextField(default='')
+    revision = models.IntegerField()
+    seconds = models.FloatField(default=0)
+    created_at = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = 'analysis_pilot_evaluations'
+        constraints = [models.UniqueConstraint(fields=['item','phase','block','user_id','revision'], name='pilot_evaluation_revision_unique')]
