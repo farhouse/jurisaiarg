@@ -16,7 +16,7 @@ from psycopg.types.json import Jsonb
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'web' / 'review') if len(Path(__file__).resolve().parents) > 2 else '/app')
 from pilot_contract import (VERSION, PROMPT_VERSION, DEFAULT_MODEL, SCHEMA, INSTRUCTIONS,
-                            fingerprint, empty_result, validate_result)
+                            fingerprint, empty_result, validate_result, analysis_resources)
 from parser import parse_articles, parse_card, PARSER_VERSION
 from references import extract_references
 from legal_parser import extract_legal_changes, normalize_norm_number, NOTE_BLOCK
@@ -76,7 +76,7 @@ def preflight(model):
 def infer(snapshot, laya, model, capacity):
     # Bytes UTF-8 son un límite superior conservador de tokens del documento; no se recorta texto.
     content = json.dumps({'identity': snapshot['identity'], 'units': snapshot['units'],
-        'candidates':snapshot['candidates'],'unverified_resources':snapshot.get('resources_not_checked',[]),
+        'candidates':snapshot['candidates'],'unverified_resources':analysis_resources(snapshot.get('resources_not_checked',[])),
         'laya':[{k:v for k,v in r.items() if k!='seconds'} for r in laya.get('relations',[])]},ensure_ascii=False)
     if capacity <= 0 or len((INSTRUCTIONS + content).encode()) + 12000 > capacity:
         raise PilotError('La entrada completa excede el presupuesto conservador del contexto; requiere un análisis por partes. No se truncó.')
@@ -159,7 +159,7 @@ def snapshot_source(row, source):
         'title': title or '', 'summary': summary or '', 'issuing_body': body or '', 'jurisdiction': jurisdiction},
         'source': {'id': source_id, 'version': 'actualizada' if version_kind == 'texto_actualizado' else 'original',
                    'url': url, 'retrieved_at': retrieved.isoformat(), 'html': html, 'hash': fingerprint(html)},
-        'units':units,'candidates':candidates,'parser_version':PARSER_VERSION,'resources_not_checked':resources,
+        'units':units,'candidates':candidates,'parser_version':PARSER_VERSION,'resources_not_checked':analysis_resources(resources),
         'integrity': check_document(html, text, [{'label': a['label'], 'text': a['text']} for a in articles])}
     return result
 
@@ -193,9 +193,9 @@ def reference_draft(snapshot):
 
 
 def prepare(con, pilot_id, report):
-    pilot = con.execute('SELECT crawl_run_id FROM analysis_pilots WHERE id=%s', (pilot_id,)).fetchone()
+    pilot = con.execute('SELECT crawl_run_id,config FROM analysis_pilots WHERE id=%s', (pilot_id,)).fetchone()
     rows = con.execute('''SELECT DISTINCT n.id,n.infoleg_id,n.norm_type,n.number,n.canonical_title,n.summary,n.issuing_body,n.jurisdiction
-        FROM norms n JOIN crawl_items ci ON ci.norm_id=n.id WHERE ci.crawl_run_id=%s ORDER BY n.id''', pilot).fetchall()
+        FROM norms n JOIN crawl_items ci ON ci.norm_id=n.id WHERE ci.crawl_run_id=%s ORDER BY n.id''', (pilot[0],)).fetchall()
     available = []
     excluded = []
     for row in rows:
@@ -260,7 +260,9 @@ def prepare(con, pilot_id, report):
                 (Jsonb({'search_queries':['Expropiación de un inmueble para dependencias judiciales',
                     'Cómo se financia la adquisición del inmueble destinado al Poder Judicial']}),pilot_id,snapshot['identity']['norm_id']))
         report('Congelando fuente de la muestra', document=f"InfoLEG {snapshot['identity']['infoleg_id']}")
-    con.execute("UPDATE analysis_pilots SET status='reference',coverage=%s WHERE id=%s", (Jsonb(coverage), pilot_id))
+    reference_required = pilot[1].get('reference_required', True)
+    con.execute('UPDATE analysis_pilots SET status=%s,phase=%s,coverage=%s WHERE id=%s',
+                ('reference' if reference_required else 'running', 'prepare' if reference_required else 'analyze', Jsonb(coverage), pilot_id))
     con.commit()
 
 
@@ -310,7 +312,7 @@ def analyze(con, pilot_id, job_id, report):
     for done, (pk, snapshot, laya, status, key) in enumerate(rows, 1):
         if status == 'done':
             continue
-        cache_key = fingerprint([key,model,VERSION,PROMPT_VERSION,laya.get('revision'),
+        cache_key = fingerprint([key,model,VERSION,PROMPT_VERSION,laya.get('revision'),analysis_resources(snapshot.get('resources_not_checked',[])),
             [{k:v for k,v in r.items() if k!='seconds'} for r in laya.get('relations',[])]])
         previous = con.execute('''SELECT result,metadata FROM analysis_pilot_items WHERE status='done'
             AND metadata->>'cache_key'=%s ORDER BY id LIMIT 1''', (cache_key,)).fetchone()

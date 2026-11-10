@@ -4,7 +4,7 @@ import json
 import os
 import unittest
 import uuid
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 from urllib.error import HTTPError
 
 import psycopg
@@ -40,6 +40,11 @@ class PilotContractTest(unittest.TestCase):
         image_snapshot=pilot.snapshot_source((1,1,'Ley','23600','EXPROPIACIONES','','Congreso','nacional'),
             (1,'texto_original','https://example.invalid/norma',datetime.datetime.now(datetime.timezone.utc),HTML.replace('</body>','<img src="anexo.png"></body>')))
         self.assertEqual(image_snapshot['resources_not_checked'][0]['url'],'https://example.invalid/anexo.png')
+        resources=[{'kind':'img','url':url} for url in (
+            'https://servicios.infoleg.gob.ar/infolegInternet/imagenes/left.png',
+            'https://servicios.infoleg.gob.ar/infolegInternet/anexos/plano.png',
+            'https://example.invalid/infolegInternet/imagenes/left.png')]
+        self.assertEqual(pilot.analysis_resources(resources),resources[1:])
         for change in ('quote','foreign','missing','primary','direction'):
             bad = copy.deepcopy(result)
             if change=='quote': bad['summary']['evidence'][0]['quote']='Lavalle 1241'
@@ -133,6 +138,20 @@ class PilotIntegrationTest(unittest.TestCase):
             self.assertEqual(metadata['reference_authors']['summary'],'second')
             self.assertEqual(metadata['reference_decisions']['summary'],'legal')
             self.assertEqual(metadata['attempts'],[])
+            # El modo directo congela la muestra y continúa sin ninguna evaluación humana.
+            con.execute("UPDATE analysis_pilots SET phase='prepare',config=config || %s WHERE id=%s",(Jsonb({'reference_required':False}),pk2))
+            con.commit()
+            real_popen=worker.subprocess.Popen
+            stages=[]
+            def child(args, **kwargs):
+                stages.append(args[2])
+                if args[2]=='prepare':return real_popen(args,**kwargs)
+                return Mock(wait=Mock(return_value=0),poll=Mock(return_value=0))
+            with patch('worker.subprocess.Popen',side_effect=child):
+                self.assertTrue(worker.process_pilot(con,dsn,{'id':job2}))
+            self.assertEqual(stages,['prepare','preflight','laya','analyze'])
+            self.assertEqual(con.execute('SELECT phase FROM analysis_pilots WHERE id=%s',(pk2,)).fetchone()[0],'analyze')
+            self.assertEqual(con.execute('SELECT count(*) FROM analysis_pilot_evaluations WHERE item_id=%s',(item,)).fetchone()[0],0)
             # Ni siquiera la recuperación de un piloto interrumpido cambia su lote de origen.
             con.execute("UPDATE crawl_jobs SET status='running' WHERE id=%s",(job2,));con.commit()
             worker.recover_interrupted(con)

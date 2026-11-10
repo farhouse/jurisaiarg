@@ -24,8 +24,9 @@ búsqueda semántica.
   [procesamiento híbrido y guía del piloto](docs/procesamiento-hibrido.md).
 
 El piloto aislado se abre desde **Gestión → Pilotos**. Trabaja con un lote ya
-descargado, congela una muestra y su referencia revisada, y compara las propuestas
-sin modificar el validador habitual. Para habilitar OpenRouter, configurar
+descargado, congela una muestra y genera fichas para revisar después. La referencia
+manual previa es opcional, para una evaluación avanzada; el validador habitual
+mantiene sus decisiones. Para habilitar OpenRouter, configurar
 `OPENROUTER_API_KEY` y `JURISAI_PILOT_MODEL` según [.env.example](.env.example),
 usar el Compose actualizado y recrear `init`, `crawler` y `web`.
 La clave se pasa solamente al crawler. Ver la [guía del piloto](docs/procesamiento-hibrido.md#uso-en-dockhand).

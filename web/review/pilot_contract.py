@@ -1,6 +1,7 @@
 """Contrato compartido por el piloto aislado y su revisión; no modifica normas."""
 import hashlib
 import json
+from urllib.parse import urlsplit
 
 VERSION = 'jurisai-pilot-v1'
 PROMPT_VERSION = 'norm-context-v1'
@@ -8,7 +9,14 @@ DEFAULT_MODEL = 'nvidia/nemotron-3.5-super-vl:free'
 MATTERS = ['Civil y comercial', 'Laboral', 'Familia', 'Penal', 'Administrativo',
            'Tributario', 'Constitucional', 'Seguridad social', 'Ambiental', 'Consumidor']
 BLOCKS = {'summary': 'Resumen', 'matters': 'Materias', 'concepts': 'Conceptos',
-          'articles': 'Función de los artículos', 'relations': 'Relaciones'}
+          'relations': 'Relaciones', 'articles': 'Función de los artículos'}
+
+
+def analysis_resources(resources):
+    # La flecha de navegación de InfoLEG no es contenido jurídico. No excluir otras imágenes.
+    return [r for r in resources if not (
+        urlsplit(r['url']).hostname in ('servicios.infoleg.gob.ar', 'infoleg.gob.ar', 'www.infoleg.gob.ar')
+        and urlsplit(r['url']).path.casefold() == '/infoleginternet/imagenes/left.png')]
 
 
 def object_schema(properties):

@@ -9,18 +9,21 @@ from django.db.models import Value,TextField
 from django.db.models.functions import Replace
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_http_methods, require_GET
 
 from .models import AnalysisPilot, AnalysisPilotItem, AnalysisPilotEvaluation, CrawlJob, CrawlRun, Norm
-from .pilot_contract import BLOCKS, DEFAULT_MODEL, VERSION, PROMPT_VERSION
+from .pilot_contract import BLOCKS, DEFAULT_MODEL, VERSION, PROMPT_VERSION, analysis_resources
 from .pilot_forms import BlockForm
 from .workflow import staff_required
 
 
 class PrepareForm(forms.Form):
     run = forms.ModelChoiceField(label='Lote descargado', queryset=CrawlRun.objects.none())
+    reference_required = forms.BooleanField(label='Preparar una referencia manual antes del análisis', required=False,
+        help_text='Opcional. Detiene el trabajo para revisar respuestas esperadas antes de consultar al modelo.')
     submission_id = forms.UUIDField(widget=forms.HiddenInput)
 
     def __init__(self, *args, **kwargs):
@@ -51,7 +54,7 @@ def index(request):
             else:
                 pilot, _ = AnalysisPilot.objects.get_or_create(job=job, defaults={'crawl_run':run,
                     'model':os.environ.get('JURISAI_PILOT_MODEL',DEFAULT_MODEL),'created_at':timezone.now(),
-                    'config':{'contract':VERSION,'prompt':PROMPT_VERSION}})
+                    'config':{'contract':VERSION,'prompt':PROMPT_VERSION,'reference_required':form.cleaned_data['reference_required']}})
                 return redirect('review:pilot_detail', pk=pilot.pk)
     return render(request,'review/pilots/index.html',{'form':form,'pilots':AnalysisPilot.objects.select_related('job','crawl_run')[:50]},
                   status=400 if request.method=='POST' else 200)
@@ -65,12 +68,15 @@ def report_data(pilot):
     by_block = {block: {'label':label,'confirmed':0,'corrected':0,'legal':0} for block,label in BLOCKS.items()}
     laya_metrics = {'correct':0,'different':0,'incomplete':0,'topics_same':0,'topics_different':0}
     editing_seconds = 0
-    seconds = tokens = requests = 0
+    seconds = tokens = requests = reviewed = 0
     costs = []
     for item in items:
         all_reviews = list(item.evaluations.filter(phase='result',block__in=list(BLOCKS)).order_by('id'))
+        latest = {(r.user_id,r.block):r for r in all_reviews}
+        reviewed += any(all(latest.get((user,block)) and latest[user,block].decision!='pending'
+                            for block in BLOCKS if block!='articles') for user in {r.user_id for r in all_reviews})
         editing_seconds += sum(r.seconds for r in item.evaluations.all())
-        for review in {(r.user_id,r.block):r for r in all_reviews}.values():
+        for review in latest.values():
             totals[review.decision] += 1
             by_split[item.split][review.decision] += 1
             if review.decision in by_block[review.block]:
@@ -121,7 +127,7 @@ def report_data(pilot):
     return {'items':items,'totals':totals,'by_split':by_split,'comparison':comparison,'by_block':by_block,
             'laya_metrics':laya_metrics,'editing_seconds':round(editing_seconds,1),
             'seconds':round(seconds,1),'tokens':tokens,'requests':requests,'reported_cost':sum(costs) if costs else None,
-            'completed':sum(i.status=='done' for i in items), 'errors':sum(i.status=='error' for i in items)}
+            'completed':sum(i.status=='done' for i in items), 'reviewed':reviewed, 'errors':sum(i.status=='error' for i in items)}
 
 
 @staff_required
@@ -135,6 +141,10 @@ def detail(request, pk):
             job = CrawlJob.objects.select_for_update().get(pk=pilot.job_id)
             if job.active:
                 error = 'El trabajo ya está en cola o ejecutándose.'
+            elif request.POST.get('action')=='analyze_now' and pilot.phase=='prepare' and pilot.status=='reference' and pilot.items.exists():
+                # También permite continuar los pilotos creados antes de que la referencia fuera opcional.
+                pilot.config['reference_required'] = False
+                pilot.phase = 'analyze'
             elif request.POST.get('action')=='analyze' and pilot.phase=='prepare' and pilot.status=='reference':
                 baseline = []
                 for item in pilot.items.select_for_update():
@@ -167,12 +177,12 @@ def detail(request, pk):
                 job.progress={}
                 job.save(update_fields=['status','error','finished_at','stage','heartbeat_at','last_activity_at','progress'])
                 pilot.status = 'preparing' if pilot.phase=='prepare' else 'running'
-                pilot.save(update_fields=['reference_locked_at','phase','status'])
+                pilot.save(update_fields=['reference_locked_at','phase','status','config'])
                 return redirect('review:pilot_detail',pk=pk)
     data = report_data(pilot)
     for item in data['items']:
         item.reference_done = sum(r.decision!='pending' for b,r in latest_reviews(item,'reference').items() if b in BLOCKS)
-        item.result_done = sum(r.decision!='pending' for b,r in latest_reviews(item,'result',request.user.pk).items() if b in BLOCKS)
+        item.result_done = sum(r.decision!='pending' for b,r in latest_reviews(item,'result',request.user.pk).items() if b in BLOCKS and b!='articles')
     now = timezone.now()
     data.update(pilot=pilot,error=error,blocks=BLOCKS,
         heartbeat_age=int((now-pilot.job.heartbeat_at).total_seconds()) if pilot.job.heartbeat_at else None,
@@ -185,7 +195,7 @@ def display_facts(block, value, snapshot):
         return [{'label':value['text'] or 'Sin resumen propuesto','evidence':value['evidence']}]
     if block=='articles':
         units = {u['id']:u for u in snapshot['units']}
-        return [{'label':units[v['unit_id']]['label']+' · '+(v['function'] or 'Función sin preparar'),
+        return [{'label':('Artículo ' if units[v['unit_id']]['kind']=='article' else '')+units[v['unit_id']]['label']+' · '+(v['function'] or 'Función sin preparar'),
                  'evidence':[{'unit_id':v['unit_id'],'quote':units[v['unit_id']]['text'][:1500]}]} for v in value]
     if block in ('matters','concepts'):
         return [{'label':v['label'],'detail':('Principal' if v['primary'] else 'Secundaria') if block=='matters' else ('Central' if v['role']=='central' else 'Mención'),
@@ -210,7 +220,7 @@ def item_detail(request, pk, item_id):
 
 
 def render_item(request,item,bound=None,error='',status=200):
-    phase = 'result' if item.pilot.reference_locked_at else 'reference'
+    phase = 'reference' if (request.GET.get('reference')=='1' or request.POST.get('phase')=='reference') and item.pilot.phase=='prepare' else 'result'
     proposal = item.result if phase=='result' else item.reference
     reviews = latest_reviews(item,phase,request.user.pk)
     blocks = []
@@ -223,8 +233,14 @@ def render_item(request,item,bound=None,error='',status=200):
                 'notes':previous.notes if previous else ''}, prefix=block)
             if bound is not None and bound.block==block:
                 form=bound
-            blocks.append({'key':block,'label':label,'form':form,'facts':display_facts(block,value,item.snapshot),
-                'baseline':display_facts(block,item.reference[block],item.snapshot) if phase=='result' else [],
+            facts = display_facts(block,value,item.snapshot)
+            proofs = {}
+            for fact in facts:
+                for evidence in fact.get('evidence',[]):
+                    proof = proofs.setdefault((evidence['unit_id'],evidence['quote']),{**evidence,'labels':[]})
+                    proof['labels'].append(fact['label'])
+            blocks.append({'key':block,'label':label,'form':form,'facts':facts,'evidence':list(proofs.values()),
+                'baseline':display_facts(block,item.reference[block],item.snapshot) if phase=='result' and item.pilot.reference_locked_at else None,
                 'previous':previous})
     ids = list(item.pilot.items.values_list('id',flat=True))
     position = ids.index(item.pk)
@@ -233,7 +249,9 @@ def render_item(request,item,bound=None,error='',status=200):
         'position':position+1,'total':len(ids),'history':item.evaluations.order_by('-id')[:30],
         'queries_revision':reviews['search_queries'].revision if 'search_queries' in reviews else 0,
         'queries_text':'\n'.join(reviews['search_queries'].value if 'search_queries' in reviews else item.metadata.get('search_queries',[])),
-        'source_when':parse_datetime(item.snapshot['source']['retrieved_at']),'error':error},status=status)
+        'source_when':parse_datetime(item.snapshot['source']['retrieved_at']),
+        'resources':analysis_resources(item.snapshot.get('resources_not_checked',[])),
+        'reference_query':'?reference=1' if phase=='reference' else '', 'error':error},status=status)
 
 
 @staff_required
@@ -246,7 +264,7 @@ def evaluate(request, pk, item_id):
         block = request.POST.get('block')
         if block not in [*BLOCKS,'search_queries'] or phase not in ('reference','result'):
             return JsonResponse({'error':'Bloque o etapa de revisión inválidos.'},status=400)
-        if (phase=='reference' and pilot.reference_locked_at) or (phase=='result' and item.status!='done'):
+        if (phase=='reference' and (pilot.reference_locked_at or pilot.phase!='prepare')) or (phase=='result' and item.status!='done'):
             return JsonResponse({'error':'Esta referencia está congelada o el resultado todavía no está listo.'},status=409)
         proposal = item.reference if phase=='reference' else item.result
         previous = item.evaluations.filter(phase=phase,block=block,user_id=request.user.pk).order_by('-revision').first()
@@ -275,7 +293,7 @@ def evaluate(request, pk, item_id):
             notes=data['notes'],revision=revision+1,created_at=timezone.now(),seconds=(data.get('elapsed_ms') or 0)/1000)
     if request.headers.get('X-Requested-With')=='XMLHttpRequest':
         return JsonResponse({'revision':review.revision,'message':'Guardado','decision':review.decision})
-    return redirect('review:pilot_item',pk=pk,item_id=item_id)
+    return redirect(reverse('review:pilot_item',kwargs={'pk':pk,'item_id':item_id})+('?reference=1' if phase=='reference' else ''))
 
 
 @staff_required

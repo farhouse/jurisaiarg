@@ -1,6 +1,6 @@
 # Responsabilidades y resultados del procesamiento híbrido de JurisAI
 
-Estado: especificación y guía del piloto aislado. Fecha: 9 de noviembre de 2026.
+Estado: especificación y guía del piloto aislado. Actualizado: 10 de noviembre de 2026.
 
 JurisAI debe convertir fuentes oficiales en normas consultables por identidad,
 palabras y significado, con evidencia de cómo obtuvo cada dato. El resultado
@@ -258,14 +258,23 @@ indexado. Las nuevas propuestas no sobrescriben revisiones humanas anteriores.
 
 ## Piloto y criterios de aceptación
 
-Comenzamos con 30 normas ya descargadas: 20 para ajustar instrucciones y 10
-reservadas para comprobar el resultado sin seguir ajustándolo sobre esos ejemplos.
+El modo habitual analiza hasta 30 normas ya descargadas y permite revisar las
+fichas después. No exige preparar respuestas correctas para poder probar la LLM.
+Registra confirmaciones, correcciones, dudas y consumo; sin referencia previa no
+calcula exactitud ni todas las omisiones. Confirmar una ficha cubre resumen,
+materias, conceptos y relaciones. Las funciones de los artículos son consultables
+y corregibles, pero no requieren una decisión adicional para completar la ficha.
+
+La evaluación avanzada es opcional. En ella se prepara primero una referencia
+independiente del modelo. La muestra reserva aproximadamente un tercio de las
+normas para comprobar el resultado sin seguir ajustando las instrucciones sobre
+esos ejemplos (20 de ajuste y 10 reservadas cuando hay 30).
 Incluimos normas simples y largas, varias materias, citas sin modificación, efectos
 explícitos, alcances parciales, notas editoriales, anexos y referencias sin destino
 descargado. Este tamaño sirve para detectar fallos; no demuestra por sí solo que
 todo el corpus pueda aprobarse automáticamente.
 
-La referencia esperada se prepara por campo a partir de la fuente; no se toma el
+En esa evaluación, la referencia esperada se prepara por campo a partir de la fuente; no se toma el
 resultado del modelo como respuesta correcta. Comparamos Laya con las etiquetas
 cerradas esperadas y la LLM con los campos que le corresponden. Para materias,
 Laya participa en modo experimental para decidir si conviene delegarle parte de
@@ -312,31 +321,43 @@ recrearlos. `.env` queda fuera de Git y `.env.example` no contiene secretos.
 La clave nunca se guarda en el piloto, en el navegador o en los logs.
 
 1. Entrar como administrador en **Gestión → Pilotos** y elegir un lote terminado.
-2. Preparar la muestra. El trabajador conserva el HTML y su extracción dentro del
-   piloto, sin descargar ni modificar la extracción jurídica existente.
-3. Abrir cada norma y revisar sus cinco bloques de referencia. El borrador usa
-   reglas, vocabulario y sumario oficial; la Ley 23.600 incluye el ejemplo
-   fundamentado de este documento. Las demás referencias pueden necesitar
-   completar el resumen o la función de los artículos. No se consideran respuestas
-   correctas hasta que una persona las revise. Se puede señalar una duda jurídica
-   para excluir ese bloque de la comparación automática.
-4. Agregar consultas cotidianas de prueba. Los cambios en los bloques se guardan
-   automáticamente; cada decisión conserva usuario, fecha y revisión. La navegación
-   espera el guardado y los errores se muestran junto al bloque afectado.
-5. Volver al piloto y elegir **Congelar referencia e iniciar análisis**. Todos los
-   bloques deben tener una decisión; una duda jurídica cuenta como decisión, no
-   como referencia correcta. La referencia deja de ser editable.
-6. El trabajador comprueba OpenRouter, ejecuta Laya en un subproceso que termina,
-   y luego analiza las fichas mediante API. Las entradas demasiado grandes se
-   informan sin truncamiento; el análisis por partes queda para una ampliación.
-7. Revisar las propuestas frente a la fuente y la referencia congelada. Corregir
-   campos mantiene las evidencias conservadas y permite añadir citas para datos
-   nuevos. Una norma referida ausente se muestra como pendiente de incorporación.
-8. Consultar el informe y exportar fuentes, resultados e historial. Un intento
+2. Pulsar **Analizar muestra del lote**. El trabajador conserva el HTML y su
+   extracción dentro del piloto, comprueba OpenRouter, ejecuta Laya en un subproceso
+   que termina y luego genera las fichas mediante API. No vuelve a descargar fuentes
+   ni modifica la extracción jurídica existente. Las entradas demasiado grandes
+   se informan sin truncamiento.
+3. Esperar a que aparezcan fichas disponibles. Se muestran la etapa, última señal,
+   actividad y errores. El procesamiento continúa en segundo plano.
+4. Elegir **Revisar ficha**. Leer resumen, materias, conceptos y relaciones junto a
+   la fuente. Las evidencias, funciones de artículos y formularios de corrección
+   están desplegables. **Confirmar ficha y continuar** confirma los bloques pendientes
+   de la ficha, conserva las correcciones o dudas previas y avanza cuando el guardado
+   termina. No registra una aprobación de las funciones de los artículos ocultas.
+5. Corregir solamente los bloques con problemas o indicar la duda jurídica. Los
+   cambios se guardan automáticamente; cada decisión conserva usuario, fecha y
+   revisión. Los errores impiden navegar y se muestran en el bloque afectado.
+   Una norma referida ausente se muestra como pendiente de incorporación.
+6. Consultar el informe y exportar fuentes, resultados e historial. Un intento
    fallido conserva las respuestas anteriores; **Retomar piloto** reutiliza las
    tareas terminadas cuando coinciden contenido y versiones.
 
-El informe distingue los grupos de ajuste y evaluación reservada. Muestra
+**Pilotos anteriores detenidos en la referencia:** abrir el detalle del piloto y
+elegir **Analizar ahora**. Continúa sobre la muestra ya congelada sin exigir
+decisiones. Conserva los borradores e historial de referencia, sin presentarlos
+como respuestas correctas ni permitir cambiarlos durante el análisis.
+
+**Evaluación avanzada:** desplegar la opción al crear el piloto y marcar
+**Preparar una referencia manual antes del análisis**. Al terminar la preparación,
+abrir **Preparar una referencia antes de analizar · opcional** en el detalle. Los
+borradores usan reglas, vocabulario y sumario oficial; no son resultados de la LLM.
+Revisar los cinco bloques de cada norma, completar lo necesario y agregar consultas
+cotidianas si corresponde. Una duda jurídica cuenta como decisión pero no como
+referencia correcta. **Congelar referencia e iniciar análisis** fija las respuestas
+y permite compararlas después. **Analizar ahora** permite omitir esta preparación.
+Una evaluación posterior a leer las propuestas no se presenta como referencia
+independiente preparada de antemano.
+
+Cuando existe una referencia congelada, el informe distingue los grupos de ajuste y evaluación reservada. Muestra
 coincidencias y diferencias de etiquetas y relaciones; evaluaciones por persona y
 tarea; contraste de efectos y materias de Laya; fallos; solicitudes, tokens,
 latencia y coste cuando el servicio lo informa. El tiempo de edición es una

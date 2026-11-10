@@ -70,6 +70,11 @@ class BlockForm(forms.Form):
                 widget=forms.Textarea(attrs={'rows':3,'placeholder':'Copiá el pasaje exacto de la fuente que ves a la izquierda.'}))
         self.initial = {**defaults, **self.initial}
 
+    @property
+    def relation_rows(self):
+        return [{'new':i>=len(self.value), 'fields':[self[name] for name in self.fields if name.startswith(f'rel_{i}_')]}
+                for i in range(self.relation_count)]
+
     def build_value(self):
         data = self.cleaned_data
         if data['decision'] not in ('corrected','legal'):

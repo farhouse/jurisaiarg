@@ -7,6 +7,7 @@
   const storageKey = form => `jurisai-pilot:${document.querySelector('.pilot-workspace').dataset.user}:${form.action}:${form.elements.phase.value}:${form.dataset.block}`;
   function showError(form, message, fields = {}) {
     const panel = form.querySelector('.pilot-form-errors');
+    for (let el = panel.parentElement; el; el = el.parentElement) if (el.tagName==='DETAILS') el.open=true;
     panel.replaceChildren();
     const strong = document.createElement('strong'); strong.textContent = message; panel.append(strong);
     for (const [name, errors] of Object.entries(fields)) {
@@ -36,7 +37,7 @@
         form.editStarted = null;
         form.querySelector('.pilot-form-errors').hidden = true;
         form.querySelectorAll('[aria-invalid]').forEach(input => input.removeAttribute('aria-invalid'));
-        form.querySelector('.pilot-block-state').textContent = 'Guardado';
+        form.querySelector('.pilot-block-state').textContent = ({confirmed:'Confirmado', corrected:'Corregido', legal:'Requiere criterio jurídico', pending:'Sin decisión'})[result.decision] || 'Guardado';
         const current = new FormData(form); current.set(revision.name, values.get(revision.name));
         if (JSON.stringify([...current]) === version) { dirty.delete(form); sessionStorage.removeItem(storageKey(form)); }
         state.textContent = dirty.size ? 'Hay cambios por guardar.' : 'Todos los cambios están guardados.';
@@ -78,13 +79,21 @@
     });
     form.addEventListener('submit', event => { event.preventDefault(); dirty.add(form); queueSave(form); });
   });
-  document.querySelector('#pilot-confirm-all')?.addEventListener('click', () => {
+  document.querySelector('#pilot-confirm-all')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
     document.querySelectorAll('.pilot-evaluation').forEach(form => {
+      // La ficha no exige aprobar las funciones de cada artículo.
+      if (form.dataset.block==='articles' && form.elements.phase.value==='result') return;
       if (form.querySelector('input[value="pending"]')?.checked) {
         const input = form.querySelector('input[value="confirmed"]'); input.checked = true;
-        input.dispatchEvent(new Event('input', {bubbles:true})); queueSave(form);
+        input.dispatchEvent(new Event('input', {bubbles:true}));
       }
     });
+    for (const form of [...dirty]) queueSave(form);
+    await chain;
+    button.disabled = false;
+    if (!dirty.size) location.href=button.dataset.nextUrl;
   });
   document.querySelectorAll('.pilot-nav').forEach(link => link.addEventListener('click', async event => {
     if (event.ctrlKey || event.metaKey || event.shiftKey) return;
@@ -97,7 +106,8 @@
   document.querySelectorAll('.pilot-evidence').forEach(link => link.addEventListener('click', event => {
     event.preventDefault();
     const unit = document.getElementById(link.getAttribute('href').slice(1));
-    if (unit) { document.querySelectorAll('.pilot-located').forEach(el => el.classList.remove('pilot-located')); unit.open=true;
+    if (unit) { document.querySelectorAll('.pilot-located').forEach(el => el.classList.remove('pilot-located'));
+      for (let el=unit; el; el=el.parentElement) if (el.tagName==='DETAILS') el.open=true;
       unit.classList.add('pilot-located'); unit.scrollIntoView({block:'center', behavior:'smooth'}); }
   }));
 })();

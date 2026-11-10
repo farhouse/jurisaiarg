@@ -134,7 +134,8 @@ def process_pilot(con, dsn, job):
     con.commit()
     try:
         with JobActivity(dsn, job['id'], heartbeat=True) as report:
-            for stage in (('prepare',) if phase == 'prepare' else ('preflight', 'laya', 'analyze')):
+            stages = ['prepare'] if phase == 'prepare' else ['preflight', 'laya', 'analyze']
+            for stage in stages:
                 con.execute('UPDATE crawl_jobs SET stage=%s WHERE id=%s', ('pilot_' + stage, job['id']))
                 con.commit()
                 report({'prepare': 'Preparando muestra congelada', 'preflight': 'Comprobando endpoint gratuito',
@@ -152,6 +153,8 @@ def process_pilot(con, dsn, job):
                         except subprocess.TimeoutExpired:
                             child.kill()
                             child.wait()
+                if stage == 'prepare' and con.execute('SELECT phase FROM analysis_pilots WHERE id=%s', (pilot_id,)).fetchone()[0] == 'analyze':
+                    stages.extend(['preflight', 'laya', 'analyze'])
         con.execute("UPDATE crawl_jobs SET status='done',stage='finished',finished_at=now() WHERE id=%s", (job['id'],))
     except BaseException as exc:
         con.rollback()

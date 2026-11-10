@@ -1,10 +1,16 @@
 .pilot-toolbar { display:flex; gap:1rem; flex-wrap:wrap; align-items:center; padding:1rem 0; border-block:1px solid var(--line,#d7ded8); }
-.pilot-toolbar span { flex:1; }
+.pilot-toolbar > div { flex:1; }
+.pilot-toolbar strong, .pilot-toolbar span { display:block; }
+.pilot-toolbar span { margin-top:.4rem; font-size:.9rem; }
+.pilot-source-link { display:none; }
+.pilot-advanced input[type=checkbox] { width:auto; }
+.pilot-advanced { margin-block:1rem; }
 .pilot-workspace { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:2rem; align-items:start; margin-block:1.5rem; }
 .pilot-source { position:sticky; top:1rem; max-height:calc(100vh - 2rem); overflow:auto; margin:0; }
 .pilot-source iframe { width:100%; height:55vh; border:1px solid #c9d4cc; background:white; margin-top:1rem; }
 .pilot-source-units pre { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; line-height:1.65; }
 .pilot-source-units details { padding:.8rem 0; border-bottom:1px solid #d7ded8; scroll-margin-block:3rem; }
+.pilot-source > details { margin-top:1rem; }
 .pilot-source-units .pilot-located { outline:2px solid #28614c; outline-offset:4px; }
 .pilot-proposals { min-width:0; }
 .pilot-block { padding-bottom:2rem; margin-bottom:2rem; border-bottom:1px solid #c9d4cc; }
@@ -15,6 +21,13 @@
 .pilot-evaluation fieldset label { display:flex; gap:.6rem; align-items:center; margin:.6rem 0; }
 .pilot-evaluation input[type=radio], .pilot-evaluation input[type=checkbox] { width:auto; }
 .pilot-correction { margin-block:1rem; }
+.pilot-review-controls, .pilot-proof { margin-block:1rem; }
+.pilot-review-controls > summary, .pilot-proof > summary, .pilot-new-relation > summary { color:var(--link,#255947); }
+.pilot-concepts { padding-left:1.2rem; }
+.pilot-concepts li { margin-block:.6rem; }
+.pilot-concepts .muted { margin-left:.4rem; font-size:.9rem; }
+.pilot-articles > summary { font-weight:600; margin-bottom:1rem; }
+.pilot-new-relation { margin-block:1.5rem; }
 .pilot-field { margin-block:1rem; }
 .pilot-field label { display:block; margin-bottom:.4rem; }
 .pilot-field input, .pilot-field textarea, .pilot-field select { max-width:100%; }
@@ -23,4 +36,11 @@
 .pilot-pagination { display:flex; gap:1rem; flex-wrap:wrap; justify-content:space-between; margin-block:2rem; }
 .pilot-baseline { padding:1rem; background:#eaf0eb; border-radius:8px; }
 .pilot-block-state { display:block; margin-top:.6rem; }
-@media (max-width:850px) { .pilot-workspace { grid-template-columns:minmax(0,1fr); gap:1.5rem; } .pilot-source { position:static; max-height:none; } .pilot-source iframe { height:50vh; } .pilot-source-units { max-height:45vh; overflow:auto; } }
+@media (max-width:850px) {
+  .pilot-toolbar { flex-direction:column; align-items:stretch; }
+  .pilot-source-link { display:inline-block; margin-top:1rem; }
+  .pilot-workspace { grid-template-columns:minmax(0,1fr); gap:1.5rem; }
+  .pilot-source { position:static; max-height:none; order:2; scroll-margin-block:1rem; }
+  .pilot-source iframe { height:50vh; }
+  .pilot-source-units { max-height:45vh; overflow:auto; }
+}
