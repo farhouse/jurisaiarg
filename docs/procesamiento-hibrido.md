@@ -238,7 +238,7 @@ depende también del proveedor; debe exigirse soporte de los parámetros utiliza
 [Groq Structured Outputs](https://console.groq.com/docs/structured-outputs),
 [OpenRouter Structured Outputs](https://openrouter.ai/docs/guides/features/structured-outputs).
 
-El piloto usa OpenRouter con el modelo fijo
+El piloto usa OpenRouter; el modelo predeterminado es
 `nvidia/nemotron-3.5-super-vl:free`. Antes de analizar consulta sus endpoints y
 exige precio cero y soporte anunciado de JSON Schema. Cada solicitud exige los
 parámetros y precio de entrada y salida cero. La respuesta se valida localmente;
@@ -317,7 +317,15 @@ JURISAI_PILOT_REASONING_TOKENS=4096
 ```
 
 El Compose pasa la clave solamente a `crawler`; el nombre del modelo también
-llega a `web` para fijarlo al crear el piloto. Un `.env` no envía por sí solo
+llega a `web` como selección predeterminada. En **Gestión → Pilotos** el administrador
+puede elegir otro modelo para una ejecución nueva. El selector consulta el catálogo
+público de OpenRouter, sin clave, y ofrece variantes `:free` con precios de entrada
+y salida cero y soporte anunciado de `structured_outputs` y `response_format`.
+La lista se conserva hasta cinco minutos; ante un fallo de consulta se avisa y se
+ofrece solo el modelo configurado, que igualmente debe superar la comprobación del
+trabajador. No se habilitan modelos pagos ni cambios automáticos de modelo.
+
+Un `.env` no envía por sí solo
 variables nuevas a los contenedores: hay que usar el Compose actualizado y
 recrearlos. `.env` queda fuera de Git y `.env.example` no contiene secretos.
 La clave nunca se guarda en el piloto, en el navegador o en los logs.
@@ -337,7 +345,9 @@ pendiente de análisis por partes. No se recorta ni se acepta un JSON incompleto
 Las solicitudes de generación tienen un tiempo de espera de 360 segundos; un
 fallo de conexión también conserva el trabajo previo.
 
-1. Entrar como administrador en **Gestión → Pilotos** y elegir un lote terminado.
+1. Entrar como administrador en **Gestión → Pilotos**, elegir un lote terminado y
+   el **Modelo de OpenRouter**. La elección queda guardada en esa ejecución, aunque
+   después cambie la variable predeterminada del servidor.
 2. Pulsar **Analizar muestra del lote**. El trabajador conserva el HTML y su
    extracción dentro del piloto, comprueba OpenRouter, ejecuta Laya en un subproceso
    que termina y luego genera las fichas mediante API. No vuelve a descargar fuentes
@@ -362,6 +372,17 @@ fallo de conexión también conserva el trabajo previo.
 elegir **Analizar ahora**. Continúa sobre la muestra ya congelada sin exigir
 decisiones. Conserva los borradores e historial de referencia, sin presentarlos
 como respuestas correctas ni permitir cambiarlos durante el análisis.
+
+**Comparar modelos sobre la misma muestra:** cuando el piloto no esté en cola ni
+ejecutándose, abrir **Probar esta muestra con otro modelo** en su detalle. Elegir
+otro modelo y pulsar **Crear piloto con este modelo**. Se crea una ejecución
+separada con las fuentes congeladas, la misma selección y grupo reservado, y los
+resultados de Laya ya disponibles. No se descargan otra vez las fuentes ni se
+mezclan salidas de modelos. Se conserva la referencia congelada y su procedencia,
+si existe, pero no se copian evaluaciones humanas, respuestas de tarjetas, errores
+ni propuestas anteriores como resultados del nuevo modelo. Ambos pilotos conservan
+su historial y un enlace identifica de dónde procede la muestra. No requiere
+migraciones ni nuevas credenciales.
 
 **Evaluación avanzada:** desplegar la opción al crear el piloto y marcar
 **Preparar una referencia manual antes del análisis**. Al terminar la preparación,

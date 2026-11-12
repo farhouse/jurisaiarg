@@ -1,9 +1,13 @@
 """Administración y evaluaciones del piloto, independientes de la revisión habitual."""
 from copy import deepcopy
+import json
 import os
 import uuid
+from urllib.error import URLError
+from urllib.request import urlopen
 
 from django import forms
+from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Value,TextField
 from django.db.models.functions import Replace
@@ -20,11 +24,53 @@ from .pilot_forms import BlockForm
 from .workflow import staff_required
 
 
-class PrepareForm(forms.Form):
+def model_choices():
+    """Catálogo público; la clave sigue exclusivamente en el crawler."""
+    key = 'jurisai.pilot-models.v1'
+    saved = cache.get(key)
+    if saved is not None:
+        return saved
+    try:
+        with urlopen('https://openrouter.ai/api/v1/models',timeout=5) as response:
+            raw = response.read(8*1024*1024+1)
+        if len(raw)>8*1024*1024:
+            raise ValueError('Catálogo demasiado grande')
+        models = json.loads(raw)['data']
+        choices = {}
+        for model in models:
+            identifier = model.get('id','')
+            if (isinstance(identifier,str) and identifier.endswith(':free') and len(identifier)<=200
+                    and {'structured_outputs','response_format'} <= set(model.get('supported_parameters',[]))
+                    and all(float(model.get('pricing',{}).get(k,'1'))==0 for k in ('prompt','completion'))):
+                choices[identifier] = model.get('name') or identifier
+        result = (sorted(choices.items(),key=lambda row:row[1].casefold()),'')
+        if not choices:
+            result = ([], 'OpenRouter no anuncia modelos gratuitos compatibles en este momento. Volvé a intentar más tarde.')
+        cache.set(key,result,300)
+        return result
+    except (URLError,OSError,ValueError,KeyError,TypeError,AttributeError):
+        default = os.environ.get('JURISAI_PILOT_MODEL',DEFAULT_MODEL)
+        choices = [(default,default+' · comprobar al ejecutar')] if default.endswith(':free') else []
+        result = (choices,'No se pudo consultar el catálogo de OpenRouter. Por ahora solo se ofrece el modelo configurado; se comprobará antes de ejecutar.')
+        cache.set(key,result,30)
+        return result
+
+
+class ModelForm(forms.Form):
+    model = forms.ChoiceField(label='Modelo de OpenRouter',choices=[],
+        help_text='Modelos gratuitos que anuncian salida estructurada. El trabajador comprueba la disponibilidad antes de analizar.')
+    submission_id = forms.UUIDField(widget=forms.HiddenInput)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        choices,self.catalog_warning = model_choices()
+        self.fields['model'].choices = [('', 'Elegí un modelo')]+choices
+
+
+class PrepareForm(ModelForm):
     run = forms.ModelChoiceField(label='Lote descargado', queryset=CrawlRun.objects.none())
     reference_required = forms.BooleanField(label='Preparar una referencia manual antes del análisis', required=False,
         help_text='Opcional. Detiene el trabajo para revisar respuestas esperadas antes de consultar al modelo.')
-    submission_id = forms.UUIDField(widget=forms.HiddenInput)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -42,7 +88,8 @@ def latest_reviews(item, phase, user_id=None):
 @staff_required
 @require_http_methods(['GET','POST'])
 def index(request):
-    form = PrepareForm(request.POST if request.method=='POST' else None, initial={'submission_id':uuid.uuid4()})
+    form = PrepareForm(request.POST if request.method=='POST' else None, initial={
+        'submission_id':uuid.uuid4(),'model':os.environ.get('JURISAI_PILOT_MODEL',DEFAULT_MODEL)})
     if request.method=='POST' and form.is_valid():
         run = form.cleaned_data['run']
         with transaction.atomic():
@@ -53,9 +100,12 @@ def index(request):
                 form.add_error(None,'La solicitud ya pertenece a otra tarea. Recargá el formulario.')
             else:
                 pilot, _ = AnalysisPilot.objects.get_or_create(job=job, defaults={'crawl_run':run,
-                    'model':os.environ.get('JURISAI_PILOT_MODEL',DEFAULT_MODEL),'created_at':timezone.now(),
+                    'model':form.cleaned_data['model'],'created_at':timezone.now(),
                     'config':{'contract':VERSION,'prompt':PROMPT_VERSION,'reference_required':form.cleaned_data['reference_required']}})
-                return redirect('review:pilot_detail', pk=pilot.pk)
+                if pilot.model!=form.cleaned_data['model'] or pilot.crawl_run_id!=run.pk or pilot.config.get('source_pilot_id'):
+                    form.add_error(None,'Esta solicitud ya creó otro piloto. Recargá antes de cambiar el modelo o lote.')
+                else:
+                    return redirect('review:pilot_detail', pk=pilot.pk)
     return render(request,'review/pilots/index.html',{'form':form,'pilots':AnalysisPilot.objects.select_related('job','crawl_run')[:50]},
                   status=400 if request.method=='POST' else 200)
 
@@ -135,12 +185,41 @@ def report_data(pilot):
 def detail(request, pk):
     pilot = get_object_or_404(AnalysisPilot.objects.select_related('job','crawl_run'),pk=pk)
     error = ''
+    model_form = None
     if request.method=='POST':
         with transaction.atomic():
             pilot = AnalysisPilot.objects.select_for_update().select_related('job').get(pk=pk)
             job = CrawlJob.objects.select_for_update().get(pk=pilot.job_id)
             if job.active:
                 error = 'El trabajo ya está en cola o ejecutándose.'
+            elif request.POST.get('action')=='compare_model' and pilot.items.exists():
+                model_form = ModelForm(request.POST)
+                if model_form.is_valid():
+                    if model_form.cleaned_data['model']==pilot.model:
+                        model_form.add_error('model','Elegí un modelo diferente al de este piloto.')
+                    else:
+                        new_job,_ = CrawlJob.objects.get_or_create(submission_id=model_form.cleaned_data['submission_id'],defaults={
+                            'mode':'pilot','start_id':job.start_id,'end_id':job.end_id,'crawl_run':pilot.crawl_run,
+                            'requested_by':request.user.username,'created_at':timezone.now()})
+                        if new_job.mode!='pilot':
+                            error = 'Esta solicitud pertenece a otro trabajo. Recargá antes de continuar.'
+                        else:
+                            config = {k:pilot.config[k] for k in ('contract','prompt') if k in pilot.config}
+                            config.update(reference_required=False,source_pilot_id=pilot.pk)
+                            new_pilot,created = AnalysisPilot.objects.get_or_create(job=new_job,defaults={
+                                'crawl_run':pilot.crawl_run,'model':model_form.cleaned_data['model'],'created_at':timezone.now(),
+                                'status':'running','phase':'analyze','config':config,'coverage':pilot.coverage,
+                                'reference_locked_at':pilot.reference_locked_at})
+                            if new_pilot.config.get('source_pilot_id')!=pilot.pk or new_pilot.model!=model_form.cleaned_data['model']:
+                                error = 'Esta solicitud ya creó otro piloto. Recargá antes de cambiar el modelo.'
+                            else:
+                                if created:
+                                    AnalysisPilotItem.objects.bulk_create([AnalysisPilotItem(pilot=new_pilot,norm_id=item.norm_id,
+                                        snapshot=item.snapshot,reference=item.reference,split=item.split,laya=item.laya,fingerprint=item.fingerprint,
+                                        metadata={k:v for k,v in item.metadata.items() if k in ('reference_authors','reference_decisions','search_queries')})
+                                        for item in pilot.items.all()])
+                                return redirect('review:pilot_detail',pk=new_pilot.pk)
+                error = error or 'No se creó otro piloto. Revisá el modelo seleccionado.'
             elif request.POST.get('action')=='analyze_now' and pilot.phase=='prepare' and pilot.status=='reference' and pilot.items.exists():
                 # También permite continuar los pilotos creados antes de que la referencia fuera opcional.
                 pilot.config['reference_required'] = False
@@ -180,6 +259,8 @@ def detail(request, pk):
                 pilot.save(update_fields=['reference_locked_at','phase','status','config'])
                 return redirect('review:pilot_detail',pk=pk)
     data = report_data(pilot)
+    if model_form is None and not pilot.job.active and data['items']:
+        model_form = ModelForm(initial={'submission_id':uuid.uuid4()})
     for item in data['items']:
         item.reference_done = sum(r.decision!='pending' for b,r in latest_reviews(item,'reference').items() if b in BLOCKS)
         item.result_done = sum(r.decision!='pending' for b,r in latest_reviews(item,'result',request.user.pk).items() if b in BLOCKS and b!='articles')
@@ -188,7 +269,7 @@ def detail(request, pk):
             _,item.card_exclusions=card_proposals(item,request.user.pk)
     data['published_cards']=ReviewCard.objects.filter(item__pilot=pilot,active=True).count()
     now = timezone.now()
-    data.update(pilot=pilot,error=error,blocks=BLOCKS,
+    data.update(pilot=pilot,error=error,blocks=BLOCKS,model_form=model_form,
         heartbeat_age=int((now-pilot.job.heartbeat_at).total_seconds()) if pilot.job.heartbeat_at else None,
         activity_age=int((now-pilot.job.last_activity_at).total_seconds()) if pilot.job.last_activity_at else None)
     return render(request,'review/pilots/detail.html',data,status=400 if error else 200)
