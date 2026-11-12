@@ -1,0 +1,17 @@
+{% extends 'base.html' %}{% load static %}
+{% block title %}Colaborar · JurisAI{% endblock %}
+{% block body_class %}cards-screen{% endblock %}
+{% block container_class %}cards-container{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'review/cards.css' %}">{% endblock %}
+{% block navigation %}
+<a class="brand" href="{% url 'review:home' %}">JurisAI <span>Archivo jurídico</span></a>
+<nav aria-label="Colaboración"><a href="{% url 'review:guide' %}">Cómo colaborar</a>{% if user.is_staff %}<a href="{% url 'review:management' %}">Gestión</a>{% endif %}<form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="link-button">Salir</button></form></nav>
+{% endblock %}
+{% block content %}
+<div id="cards-app" data-next-url="{% url 'review:card_next' %}" data-user="{{ user.pk }}">
+  <div class="card-notice" role="status" aria-live="polite"></div>
+  <div class="card-error" role="alert" tabindex="-1" {% if not error %}hidden{% endif %}><p>{{ error }}</p><button class="button" type="button" data-retry>Reintentar guardado</button> <button class="button" type="button" data-refresh>Buscar una nueva tarjeta</button></div>
+  <div id="card-frame">{% include 'review/cards/frame.html' %}</div>
+</div>
+<script src="{% static 'review/cards.js' %}" defer></script>
+{% endblock %}

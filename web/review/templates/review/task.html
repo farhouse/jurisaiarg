@@ -3,7 +3,7 @@
 {% block title %}Revisar {{ norm.display_reference }} · JurisAI{% endblock %}
 {% block container_class %}{% if task %}guided-validation{% endif %}{% endblock %}
 {% block content %}
-<a class="back" href="{% url 'review:queue' %}?run={{ run.pk }}">Volver a la mesa de revisión</a>
+<a class="back" href="{% url 'review:legacy_queue' %}?run={{ run.pk }}">Volver a la mesa de revisión</a>
 <header class="work-heading"><div><h1>{{ norm.display_reference }}</h1><p>{{ norm.display_title }} · InfoLEG {{ norm.infoleg_id }} · {{ run.label }}</p></div></header>
 <div id="review-workspace" data-user="{{ user.pk }}" data-root="{{ root_id }}">{% include 'review/workspace.html' %}</div>
 <script src="{% static 'passage-review.js' %}" defer></script>

@@ -1,0 +1,50 @@
+.cards-screen .topbar { background:var(--paper); color:var(--green); height:auto; min-height:84px; border-bottom:1px solid var(--line); gap:1rem; }
+.cards-screen .brand { color:var(--green); font:700 27px/1.2 ui-serif,Georgia,serif; }
+.cards-screen .brand span { color:var(--ink); font:400 15px/1.5 ui-sans-serif,system-ui,sans-serif; }
+.cards-screen .topbar nav a, .cards-screen .link-button { color:var(--green); }
+.cards-container { max-width:860px; padding-bottom:3rem; }
+#card-heading { text-align:center; font:700 36px/1.15 ui-serif,Georgia,serif; margin:1.5rem 0 2rem; }
+.validation-card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:32px; touch-action:pan-y; }
+.validation-card h2 { font:700 25px/1.3 ui-serif,Georgia,serif; margin:0 0 1.5rem; }
+.card-evidence { max-height:16rem; overflow:auto; scrollbar-color:var(--green) var(--paper); }
+.card-evidence blockquote { margin:0 0 1.2rem; font:19px/1.6 ui-serif,Georgia,serif; white-space:pre-wrap; overflow-wrap:anywhere; }
+.card-evidence:has(blockquote) { border-bottom:1px solid var(--line); margin-bottom:1.5rem; }
+.validation-card h3 { font:600 24px/1.4 ui-serif,Georgia,serif; margin:0 0 .8rem; overflow-wrap:anywhere; }
+.card-instruction { margin:0 0 1.5rem; max-width:65ch; }
+.card-summary { font:21px/1.6 ui-serif,Georgia,serif; margin:0 0 1.5rem; white-space:pre-wrap; overflow-wrap:anywhere; }
+.card-context { display:flex; gap:1rem 2rem; flex-wrap:wrap; margin:1.5rem 0; }
+.card-context > details { flex:1 1 200px; min-width:0; }
+.card-context > details[open] { flex-basis:100%; }
+.card-context summary { color:var(--green); text-decoration:underline; text-underline-offset:3px; cursor:pointer; padding-block:.5rem; }
+.card-source-text { white-space:pre-wrap; overflow-wrap:anywhere; }
+.card-context section { margin-block:1.5rem; }
+.card-context section h3 { font:600 16px/1.5 ui-sans-serif,system-ui,sans-serif; }
+.card-full-source iframe { width:100%; height:55vh; border:1px solid var(--line); background:var(--panel); }
+.card-actions { display:grid; grid-template-columns:1fr 1fr .65fr; gap:12px; }
+.card-actions .button { min-height:52px; padding:12px; font-size:16px; }
+.card-answer { position:sticky; bottom:0; background:var(--panel); padding-block:12px; z-index:1; }
+.card-help,.card-shortcuts { text-align:center; }
+.card-help { margin:1rem 0 .5rem; }.card-shortcuts { color:var(--muted); font-size:13px; margin-top:0; }
+.card-last { border-top:1px solid var(--line); margin-top:2rem; padding-top:1rem; }
+.card-last p { margin-top:0; }.card-last details { margin-top:1rem; }
+.card-text-button { border:0; background:none; color:var(--green); font:inherit; padding:.5rem 0; cursor:pointer; text-decoration:underline; text-underline-offset:3px; }
+.card-note label { display:block; margin:1rem 0 .5rem; }.card-note .button { margin-top:.5rem; }
+.card-error { border:1px solid var(--red); background:#fff1ed; color:#7d281c; border-radius:10px; padding:1rem; margin-block:1rem; }
+.card-error[hidden] { display:none; }.card-error p { margin-top:0; }
+.card-notice { color:var(--green); min-height:1.5rem; text-align:center; }
+.cards-empty { text-align:center; padding-block:2rem; }.cards-empty p { max-width:55ch; margin:1rem auto; }
+.cards-screen button:disabled { cursor:wait; opacity:.65; }
+@media (max-width:650px) {
+  .cards-screen .topbar { padding:16px 18px; align-items:center; }.cards-screen .brand span { display:none; }
+  .cards-screen .topbar nav { gap:1rem; font-size:13px; }
+  .cards-container { padding-inline:18px; padding-top:12px; }
+  #card-heading { font-size:30px; margin:1rem 0 1.4rem; }
+  .validation-card { padding:20px 16px 10px; }.validation-card h2 { font-size:22px; }
+  .card-evidence blockquote { font-size:17px; line-height:1.55; }
+  .validation-card h3 { font-size:22px; }.card-summary { font-size:19px; }
+  .card-actions { grid-template-columns:1fr 1.15fr .7fr; gap:8px; }.card-actions .button { padding:10px 6px; font-size:14px; }
+  .card-context { gap:.5rem; }.card-context > details { flex-basis:100%; }
+  .card-shortcuts { display:none; }.card-last { font-size:14px; }
+  .card-full-source iframe { height:60vh; }
+}
+@media (prefers-reduced-motion:no-preference) { #card-frame.is-updated .validation-card { animation:card-arrive 160ms ease-out; } @keyframes card-arrive { from { opacity:.7; transform:translateY(5px); } to { opacity:1; transform:none; } } }

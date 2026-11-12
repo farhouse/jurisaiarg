@@ -8,8 +8,9 @@
   <link rel="stylesheet" href="{% static 'app.css' %}">
   {% block extra_head %}{% endblock %}
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
   <header class="topbar">
+    {% block navigation %}
     <a class="brand" href="{% url 'review:home' %}">JurisAI <span>Archivo jurídico</span></a>
     {% if user.is_authenticated %}
       <nav>
@@ -27,6 +28,7 @@
         <a href="{% url 'login' %}">Ingresar</a>
       </nav>
     {% endif %}
+    {% endblock %}
   </header>
   <main class="container {% block container_class %}{% endblock %}">
     {% for message in messages %}<div class="message">{{ message }}</div>{% endfor %}

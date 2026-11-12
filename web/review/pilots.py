@@ -14,7 +14,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_http_methods, require_GET
 
-from .models import AnalysisPilot, AnalysisPilotItem, AnalysisPilotEvaluation, CrawlJob, CrawlRun, Norm
+from .models import AnalysisPilot, AnalysisPilotItem, AnalysisPilotEvaluation, CrawlJob, CrawlRun, Norm, ReviewCard
 from .pilot_contract import BLOCKS, DEFAULT_MODEL, VERSION, PROMPT_VERSION, analysis_resources
 from .pilot_forms import BlockForm
 from .workflow import staff_required
@@ -183,6 +183,10 @@ def detail(request, pk):
     for item in data['items']:
         item.reference_done = sum(r.decision!='pending' for b,r in latest_reviews(item,'reference').items() if b in BLOCKS)
         item.result_done = sum(r.decision!='pending' for b,r in latest_reviews(item,'result',request.user.pk).items() if b in BLOCKS and b!='articles')
+        if item.status=='done':
+            from .cards import card_proposals
+            _,item.card_exclusions=card_proposals(item,request.user.pk)
+    data['published_cards']=ReviewCard.objects.filter(item__pilot=pilot,active=True).count()
     now = timezone.now()
     data.update(pilot=pilot,error=error,blocks=BLOCKS,
         heartbeat_age=int((now-pilot.job.heartbeat_at).total_seconds()) if pilot.job.heartbeat_at else None,

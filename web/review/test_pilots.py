@@ -3,12 +3,12 @@ from django.contrib.auth.models import User
 from django.db import connection
 from django.test import TransactionTestCase,Client
 from django.utils import timezone
-from .models import Norm,CrawlRun,CrawlJob,AnalysisPilot,AnalysisPilotItem,AnalysisPilotEvaluation
+from .models import Norm,CrawlRun,CrawlJob,AnalysisPilot,AnalysisPilotItem,AnalysisPilotEvaluation,ReviewCard,CardResponse
 from .pilot_contract import empty_result,DEFAULT_MODEL
 
 
 class PilotsTest(TransactionTestCase):
-    tables = [Norm,CrawlRun,CrawlJob,AnalysisPilot,AnalysisPilotItem,AnalysisPilotEvaluation]
+    tables = [Norm,CrawlRun,CrawlJob,AnalysisPilot,AnalysisPilotItem,AnalysisPilotEvaluation,ReviewCard,CardResponse]
 
     @classmethod
     def setUpClass(cls):

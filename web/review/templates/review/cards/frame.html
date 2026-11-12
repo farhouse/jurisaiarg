@@ -1,0 +1,33 @@
+{% if card %}
+<h1 id="card-heading" tabindex="-1">{% if card.kind == 'topic' %}Revisar un tema{% else %}Revisar un resumen{% endif %}</h1>
+<article class="validation-card" data-card-id="{{ card.pk }}" aria-labelledby="card-heading">
+  <header><h2>{{ card.snapshot.identity.type }} {{ card.snapshot.identity.number }}{% if card.kind == 'topic' and evidence|length == 1 %} · {{ evidence.0.label }}{% endif %}</h2></header>
+  {% if card.kind == 'topic' %}
+    <div class="card-evidence">{% for proof in evidence %}<blockquote>{{ proof.quote }}</blockquote>{% endfor %}</div>
+    <h3>Este fragmento trata sobre <strong>{{ card.proposal.label|lower }}</strong>.</h3>
+    <p class="card-instruction">Indicá si el tema corresponde al texto. Tu respuesta se aplica a este fragmento.</p>
+  {% else %}
+    <p class="card-summary">{{ card.proposal.text }}</p>
+    <p class="card-instruction">Comprobá en la ley que el resumen sea fiel, sin agregar conclusiones ni omitir algo importante.</p>
+  {% endif %}
+  <div class="card-context">
+    <details><summary>Ver contexto</summary>{% for proof in evidence %}<section><h3>{{ proof.label }}</h3><p class="card-source-text">{{ proof.text }}</p></section>{% endfor %}</details>
+    <details class="card-full-source"><summary>Leer ley completa</summary><p>Versión {{ card.snapshot.source.version }} · Fuente guardada con el piloto.</p><iframe loading="lazy" sandbox title="Documento original de {{ card.snapshot.identity.type }} {{ card.snapshot.identity.number }}" src="{% url 'review:card_source' card.pk %}"></iframe></details>
+  </div>
+  <form method="post" action="{% url 'review:card_answer' card.pk %}" class="card-answer" data-action="answer">
+    {% csrf_token %}<input type="hidden" name="request_id" value="{{ answer_token }}">
+    <div class="card-actions"><button class="button primary" type="submit" name="decision" value="correct" aria-keyshortcuts="1">Correcto</button><button class="button" type="submit" name="decision" value="incorrect" aria-keyshortcuts="2">{% if card.kind == 'topic' %}No corresponde{% else %}Hay un problema{% endif %}</button><button class="button" type="submit" name="decision" value="skip" aria-keyshortcuts="3">No sé</button></div>
+  </form>
+</article>
+<p class="card-help">Tu respuesta se guarda y pasás a la siguiente tarjeta.</p>
+<p class="card-shortcuts">Teclado: 1 correcto · 2 con problemas · 3 no sé · Z deshacer.</p>
+{% else %}
+<section class="cards-empty"><h1 id="card-heading" tabindex="-1">No quedan tarjetas nuevas para vos</h1><p>Podés volver cuando se habiliten más propuestas. Tus respuestas quedan guardadas.</p><a class="button" href="{% url 'review:home' %}">Volver al inicio</a>{% if user.is_staff %}<p><a href="{% url 'review:pilots' %}">Habilitar tarjetas desde un piloto</a></p>{% endif %}</section>
+{% endif %}
+{% if last %}
+<section class="card-last" aria-label="Tu última respuesta">
+  <p>Tu última respuesta: <strong>{{ last.get_decision_display }}</strong> · {{ last.card.snapshot.identity.type }} {{ last.card.snapshot.identity.number }}{% if last.card.kind == 'topic' %} · {{ last.card.proposal.label }}{% else %} · Resumen{% endif %}</p>
+  <form method="post" action="{% url 'review:card_undo' last.card_id %}" class="card-undo" data-action="undo">{% csrf_token %}<input type="hidden" name="request_id" value="{{ undo_token }}"><input type="hidden" name="answer_id" value="{{ last.pk }}"><button class="card-text-button" type="submit" aria-keyshortcuts="z">Deshacer última respuesta</button></form>
+  <details><summary>Añadir un comentario · opcional</summary><form method="post" action="{% url 'review:card_note' last.card_id %}" class="card-note" data-action="note">{% csrf_token %}<input type="hidden" name="request_id" value="{{ note_token }}"><input type="hidden" name="answer_id" value="{{ last.pk }}"><label for="card-note">Qué observaste en tu última respuesta</label><textarea id="card-note" name="notes" rows="3" maxlength="2000">{{ last_note }}</textarea><button class="button" type="submit">Guardar comentario</button><span class="card-note-state" role="status"></span></form></details>
+</section>
+{% endif %}

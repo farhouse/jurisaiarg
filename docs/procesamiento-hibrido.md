@@ -365,14 +365,62 @@ aproximación de la interacción con los formularios, no toda la lectura jurídi
 Las puntuaciones de Laya y el acuerdo de etiquetas no se presentan como exactitud
 jurídica. Las recomendaciones son exploratorias y no habilitan aprobación automática.
 
-## Límites de esta entrega
+## Colaboración por tarjetas
+
+La entrada **Validar** presenta una tarjeta por decisión: pertinencia de un tema
+para un fragmento, o fidelidad de un resumen de una norma breve. La tarjeta no
+valida la centralidad del tema ni todos los campos de la ficha. Materias, fuero,
+relaciones y correcciones avanzadas permanecen en Gestión.
+
+En el detalle de un piloto, **Habilitar tarjetas disponibles** toma exclusivamente
+fichas terminadas con esquema y evidencia válidos. **Actualizar tarjetas disponibles**
+incorpora resultados nuevos; no hace falta volver a descargarlos. Se conserva una
+copia de la fuente, versión, propuesta y procedencia por tarjeta. Una propuesta
+cambiada genera una tarjeta nueva y retira la anterior; repetir la habilitación
+con la misma entrada conserva sus respuestas. **Retirar muestra** detiene nuevas
+respuestas y el acceso de colaboradores a esas fuentes, sin borrar historial.
+
+La habilitación usa las correcciones o confirmaciones guardadas por el administrador
+que la ejecuta, conservando su procedencia en la tarjeta; si no las hay, usa el
+resultado original del modelo. Los bloques que esa persona dejó como duda jurídica
+no llegan a colaboradores. La salida original de la LLM no se reescribe. Para
+aplicar una corrección de la ficha se usa **Actualizar tarjetas disponibles**.
+
+Los resúmenes entran si el texto completo tiene hasta 4.000 caracteres, el resumen
+hasta 600, la copia coincide y no hay recursos sin comprobar. Las exclusiones se
+explican en el detalle del piloto. No se recortan datos para cumplir esos límites.
+
+`review_cards` y `card_responses` son tablas separadas, creadas por el `init`
+idempotente. Respuestas, comentarios y acciones de deshacer se agregan al historial;
+no se importan votos ni evaluaciones anteriores. Los reintentos usan una solicitud
+única por persona, y las pestañas de la misma persona se serializan al responder.
+Una persona no vuelve a recibir una tarjeta que ya respondió, incluso si eligió
+«No sé», salvo que deshaga su respuesta. Se priorizan las menos evaluadas; no se
+enseñan respuestas ajenas al decidir. No hay un umbral que apruebe datos oficiales.
+
+**Gestión → Respuestas de tarjetas** agrupa por norma la participación, respuestas
+positivas, negativas y abstenciones, y los desacuerdos sobre una misma tarjeta.
+Los totales actuales corresponden a tarjetas activas; el historial conserva también
+las retiradas. Las fichas de validadores enlazan a sus aportes por tarjetas. Las
+estadísticas históricas sobre normas y pasajes permanecen separadas.
+
+`/validar/` es la entrada de tarjetas. `/gestion/revision-avanzada/` conserva la mesa
+anterior y los enlaces `/validar/<id>/` siguen funcionando. Las fuentes de tarjetas
+solo se sirven a validadores y administradores mientras estén activas, con el mismo
+aislamiento de HTML del piloto. El documento no recibe privilegios del navegador.
+
+Para desplegar este cambio se requiere recrear `init`, `crawler` y `web` con las
+imágenes nuevas, conservando los volúmenes. No agrega claves ni servicios externos.
+
+## Límites de integración
 
 El piloto no publica resúmenes, etiquetas o relaciones en el buscador, no cambia
 E5 y no altera votos ni borradores habituales. Las consultas de ejemplo abren
 la búsqueda actual como línea base: todavía no prueban una mejora del ranking.
 
-La primera entrega está limitada a administradores. El reparto entre colaboradores
-y revisores jurídicos, el tratamiento por partes de documentos que excedan el
+Las fichas completas del piloto están limitadas a administradores; los colaboradores
+solo ven las tarjetas habilitadas. El reparto especializado de tareas jurídicas,
+el tratamiento por partes de documentos que excedan el
 contexto y la incorporación de resultados al flujo habitual se decidirán a partir
 de la evaluación. Las reglas determinísticas y Laya siguen siendo experimentales
 para los campos donde no exista una referencia jurídica revisada.

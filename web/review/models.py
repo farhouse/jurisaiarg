@@ -452,3 +452,36 @@ class AnalysisPilotEvaluation(models.Model):
         managed = False
         db_table = 'analysis_pilot_evaluations'
         constraints = [models.UniqueConstraint(fields=['item','phase','block','user_id','revision'], name='pilot_evaluation_revision_unique')]
+
+
+class ReviewCard(models.Model):
+    item = models.ForeignKey(AnalysisPilotItem, models.DO_NOTHING, related_name='cards')
+    kind = models.TextField(choices=[('topic','Tema'),('summary','Resumen')])
+    fingerprint = models.TextField()
+    snapshot = models.JSONField()
+    proposal = models.JSONField()
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = 'review_cards'
+        constraints = [models.UniqueConstraint(fields=['item','fingerprint'], name='review_card_fingerprint_unique')]
+
+
+class CardResponse(models.Model):
+    card = models.ForeignKey(ReviewCard, models.DO_NOTHING, related_name='responses')
+    user_id = models.BigIntegerField()
+    username = models.TextField()
+    action = models.TextField()
+    decision = models.TextField(choices=[('correct','Correcto'),('incorrect','Con problemas'),('skip','No sé')], default='')
+    answer = models.ForeignKey('self', models.DO_NOTHING, null=True, related_name='events')
+    notes = models.TextField(default='')
+    request_id = models.UUIDField()
+    created_at = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = 'card_responses'
+        constraints = [models.UniqueConstraint(fields=['user_id','request_id'], name='card_response_request_unique'),
+            models.UniqueConstraint(fields=['answer'], condition=models.Q(action='undo'), name='idx_card_undo_once')]

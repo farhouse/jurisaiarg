@@ -31,6 +31,11 @@ mantiene sus decisiones. Para habilitar OpenRouter, configurar
 usar el Compose actualizado y recrear `init`, `crawler` y `web`.
 La clave se pasa solamente al crawler. Ver la [guía del piloto](docs/procesamiento-hibrido.md#uso-en-dockhand).
 
+**Validar** ofrece tarjetas de temas y resúmenes. El administrador habilita las
+fichas terminadas desde un piloto; las respuestas se registran separadas de los
+datos oficiales y de los votos históricos. Gestión incluye las respuestas por ley
+y conserva la mesa de revisión avanzada.
+
 ## Docker y administración
 
 La aplicación incluye portada pública, validación humana, gestión por norma y

@@ -9,7 +9,7 @@
   <p>La copia queda correcta cuando todos los controles son correctos. Un error confirmado queda registrado aunque todavía falten otros controles.</p>
   <ul class="copy-check-list">{% for check in copy.checks %}<li><div><strong>{{ check.label }}</strong>{% if check.notes %}<p>{{ check.notes }}</p>{% endif %}</div><span class="badge {{ check.status }}">{{ check.status_label }}</span><a href="{{ check.url }}">Revisar<span class="visually-hidden"> {{ check.label }}</span></a></li>{% endfor %}</ul>
   <p>Esta revisión comprueba la copia. Las materias, los tags y las relaciones se revisan en sus solapas.</p>
-  <footer class="copy-summary-actions">{% if user.is_staff %}<a class="button" href="{% url 'review:law_reviews' task.pk %}">Ver revisiones de esta norma</a>{% endif %}{% for tab in tabs %}{% if tab.key == 'topics' %}<a class="button primary" href="{{ tab.url }}">Continuar con Materias y tags</a>{% endif %}{% endfor %}<a class="button" href="{% url 'review:queue' %}?run={{ run.pk }}">Volver a la mesa de revisión</a></footer>
+  <footer class="copy-summary-actions">{% if user.is_staff %}<a class="button" href="{% url 'review:law_reviews' task.pk %}">Ver revisiones de esta norma</a>{% endif %}{% for tab in tabs %}{% if tab.key == 'topics' %}<a class="button primary" href="{{ tab.url }}">Continuar con Materias y tags</a>{% endif %}{% endfor %}<a class="button" href="{% url 'review:legacy_queue' %}?run={{ run.pk }}">Volver a la mesa de revisión</a></footer>
 </section>
 {% else %}
 <header class="copy-work-heading">

@@ -57,11 +57,11 @@ class WorkflowTest(TransactionTestCase):
         self.assertEqual((vote.status, vote.revision), ("validada", 1))
         self.assertEqual(self.client.post(url, {"status": "rechazada", "revision": 0, "notes": "Formulario viejo"}).status_code, 409)
         self.assertEqual(ReviewEvent.objects.count(), 1)
-        self.assertEqual(self.client.get("/validar/?scope=queue").context["page"].paginator.count, 0)
-        self.assertEqual(self.client.get("/validar/?scope=mine").context["page"].paginator.count, 1)
+        self.assertEqual(self.client.get("/gestion/revision-avanzada/?scope=queue").context["page"].paginator.count, 0)
+        self.assertEqual(self.client.get("/gestion/revision-avanzada/?scope=mine").context["page"].paginator.count, 1)
         # Otro usuario conserva su formulario inicial y puede discrepar.
         self.client.force_login(second)
-        self.assertEqual(self.client.get("/validar/?scope=queue").context["page"].paginator.count, 1)
+        self.assertEqual(self.client.get("/gestion/revision-avanzada/?scope=queue").context["page"].paginator.count, 1)
         self.assertEqual(self.client.get(url).context["form"].initial["revision"], 0)
         self.assertEqual(self.client.post(url, {"status": "rechazada", "revision": 0, "notes": "Falta texto <script>alert(1)</script>"}).status_code, 302)
         self.assertEqual(NormReview.objects.count(), 2)
@@ -84,7 +84,7 @@ class WorkflowTest(TransactionTestCase):
         self.client.force_login(validator)
         self.assertEqual(self.client.post(url, {"status": "pendiente", "revision": 1, "notes": "Volver a comprobar"}).status_code, 302)
         self.assertEqual(NormReview.objects.get(user_id=second.pk).status, "rechazada")
-        self.assertEqual(self.client.get("/validar/?scope=queue").context["pending"], 1)
+        self.assertEqual(self.client.get("/gestion/revision-avanzada/?scope=queue").context["pending"], 1)
         # Renombrar la cuenta no produce otra identidad para los contadores.
         validator.username = "renamed-test"
         validator.save()
@@ -606,9 +606,9 @@ class WorkflowTest(TransactionTestCase):
         self.assertContains(page,'Administrativo')
         self.assertEqual(page.context['dossier']['issues'],[])
         self.assertEqual(len(page.context['dossier']['copy']['checks']),1)
-        self.assertEqual(self.client.get('/validar/?scope=queue').context['page'].paginator.count,0)
-        self.assertEqual(self.client.get('/validar/?scope=all').context['page'].paginator.count,1)
-        self.assertEqual(self.client.get('/validar/?scope=all&kind=pasaje').context['page'].paginator.count,1)
+        self.assertEqual(self.client.get('/gestion/revision-avanzada/?scope=queue').context['page'].paginator.count,0)
+        self.assertEqual(self.client.get('/gestion/revision-avanzada/?scope=all').context['page'].paginator.count,1)
+        self.assertEqual(self.client.get('/gestion/revision-avanzada/?scope=all&kind=pasaje').context['page'].paginator.count,1)
         summary=self.client.get(base+'?tab=copy&finish=1')
         self.assertEqual(summary.context['finish_summary']['total'],0)
         # Legacy identity votes must not become complete-document approvals.
@@ -644,7 +644,7 @@ class WorkflowTest(TransactionTestCase):
         topic.superseded=True;topic.save()
         self.assertEqual(self.client.get(f'/validar/{topic.pk}/').url,base)
         root.model_result=altered;root.decision='revision';root.save()
-        self.assertEqual(self.client.get(f'/validar/?run={run.pk}&scope=queue').context['page'].paginator.count,1)
+        self.assertEqual(self.client.get(f'/gestion/revision-avanzada/?run={run.pk}&scope=queue').context['page'].paginator.count,1)
         vote.refresh_from_db();self.assertEqual(vote.status,'validada')  # The older scoped approval remains intact.
 
     def test_zzzzzzzz_finalize_errors_explain_and_link_to_the_required_field(self):

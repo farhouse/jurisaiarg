@@ -10,6 +10,7 @@
   <p class="muted">El nombre de usuario se conserva para mantener la referencia en el historial.</p>
   <div class="crawl-actions"><button class="button primary">Guardar cambios</button></div>
 </form>
+<p><a class="button" href="{% url 'review:card_report' %}?user={{ account.pk }}">Ver aportes por tarjetas de {{ account.username }}</a></p>
 <section class="panel table-panel">
   <h2>Revisiones de normas · {{ page.paginator.count }}</h2>
   <p class="muted">Última decisión de esta persona por norma y lote. Abrí una norma para consultar las demás opiniones y el historial.</p>

@@ -25,6 +25,14 @@
   <p class="muted">Modelo fijo: {{ pilot.model }}. Solo endpoints gratuitos compatibles; no hay cambio automático a pago.</p>
 </section>
 {% if items %}
+<section class="panel"><h2>Tarjetas para colaboradores</h2>
+<p>{{ published_cards }} tarjetas habilitadas. Cada respuesta evalúa un tema o un resumen; conserva su propio historial y no aprueba la norma completa.</p>
+<form method="post" action="{% url 'review:card_publication' pilot.pk %}">{% csrf_token %}<button class="button primary" name="action" value="publish" {% if not completed %}disabled{% endif %}>{% if pilot.config.cards_enabled %}Actualizar tarjetas disponibles{% else %}Habilitar tarjetas disponibles{% endif %}</button>{% if pilot.config.cards_enabled %} <button class="button" name="action" value="withdraw">Retirar muestra</button>{% endif %}</form>
+{% if not completed %}<p>Podrás habilitarlas cuando haya fichas terminadas.</p>{% endif %}
+<p><a href="{% url 'review:card_report' %}?pilot={{ pilot.pk }}">Ver respuestas por ley</a></p>
+<details><summary>Qué contenido llega a los colaboradores</summary><p>Una tarjeta por tema con evidencia. Los resúmenes requieren texto de hasta 4.000 caracteres, resumen de hasta 600 caracteres, copia comprobada y ningún recurso pendiente. Las fichas todavía no terminadas no se habilitan.</p><p>Se usan tus correcciones o confirmaciones guardadas en la ficha; sin ellas se usa la propuesta del modelo. Los bloques que marcaste como duda jurídica quedan fuera. Actualizar tarjetas aplica esos cambios sin alterar la salida original ni las respuestas anteriores.</p>
+{% for item in items %}{% if item.card_exclusions %}<p><strong>{{ item.snapshot.identity.type }} {{ item.snapshot.identity.number }}</strong>: {{ item.card_exclusions|join:' ' }}</p>{% endif %}{% endfor %}</details>
+</section>
 <section class="panel table-panel"><h2>Normas de la muestra</h2>
 <p>{{ pilot.coverage.selected }} seleccionadas de {{ pilot.coverage.eligible }} elegibles · {{ pilot.coverage.with_references }} con referencias · {{ pilot.coverage.updated }} con texto actualizado.</p>
 <div class="table-scroll"><table><thead><tr><th>Norma</th><th>Resultado</th><th>Tu revisión</th></tr></thead><tbody>

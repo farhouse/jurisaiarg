@@ -22,7 +22,7 @@
     <div class="row-reason"><strong>{{ task.get_decision_display }}</strong>{% for reason in task.reasons_display %}<span>{{ reason }}</span>{% endfor %}{% if task.probability != None %}<small>Laya: {{ task.prediction }} · probabilidad {{ task.probability|floatformat:2 }}</small>{% endif %}{% if task.reviewed_by %}<small>{{ task.reviewed_by }} · {{ task.reviewed_at|date:"d/m H:i" }}</small>{% endif %}</div>
     <a class="button {% if task.review_status == 'pendiente' %}primary{% endif %}" href="{% url 'review:task' task.pk %}">{% if task.is_dossier %}Abrir ficha{% elif task.review_status == 'pendiente' %}Revisar{% else %}Ver decisión{% endif %}</a>
   </article>
-{% empty %}<div class="empty-state"><h2>No hay casos con estos filtros</h2><p>Podés consultar otro lote o auditar los resultados automáticos.</p><a href="{% url 'review:queue' %}" class="button">Ver pendientes del último lote</a></div>{% endfor %}
+{% empty %}<div class="empty-state"><h2>No hay casos con estos filtros</h2><p>Podés consultar otro lote o auditar los resultados automáticos.</p><a href="{% url 'review:legacy_queue' %}" class="button">Ver pendientes del último lote</a></div>{% endfor %}
 </section>
 {% if page.paginator.num_pages > 1 %}<nav class="pagination" aria-label="Páginas de casos">{% if page.has_previous %}<a href="?{{ params }}&page={{ page.previous_page_number }}">Anterior</a>{% endif %}<span>{{ page.number }} / {{ page.paginator.num_pages }}</span>{% if page.has_next %}<a href="?{{ params }}&page={{ page.next_page_number }}">Siguiente</a>{% endif %}</nav>{% endif %}
 {% endblock %}

@@ -46,3 +46,34 @@ CREATE TABLE IF NOT EXISTS analysis_pilot_evaluations (
 );
 CREATE INDEX IF NOT EXISTS idx_pilot_evaluations_latest ON analysis_pilot_evaluations(item_id,phase,block,user_id,id DESC);
 ALTER TABLE analysis_pilot_evaluations ADD COLUMN IF NOT EXISTS seconds DOUBLE PRECISION NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS review_cards (
+ id BIGSERIAL PRIMARY KEY,
+ item_id BIGINT NOT NULL REFERENCES analysis_pilot_items(id),
+ kind TEXT NOT NULL CHECK(kind IN ('topic','summary')),
+ fingerprint TEXT NOT NULL,
+ snapshot JSONB NOT NULL,
+ proposal JSONB NOT NULL,
+ active BOOLEAN NOT NULL DEFAULT true,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ UNIQUE(item_id,fingerprint)
+);
+CREATE TABLE IF NOT EXISTS card_responses (
+ id BIGSERIAL PRIMARY KEY,
+ card_id BIGINT NOT NULL REFERENCES review_cards(id),
+ user_id BIGINT NOT NULL,
+ username TEXT NOT NULL,
+ action TEXT NOT NULL CHECK(action IN ('answer','undo','note')),
+ decision TEXT NOT NULL DEFAULT '',
+ answer_id BIGINT REFERENCES card_responses(id),
+ notes TEXT NOT NULL DEFAULT '',
+ request_id UUID NOT NULL,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ UNIQUE(user_id,request_id),
+ CHECK((action='answer' AND answer_id IS NULL AND decision IN ('correct','incorrect','skip'))
+    OR (action IN ('undo','note') AND answer_id IS NOT NULL AND decision=''))
+);
+CREATE INDEX IF NOT EXISTS idx_cards_active ON review_cards(item_id) WHERE active;
+CREATE INDEX IF NOT EXISTS idx_card_responses_user ON card_responses(user_id,id DESC);
+CREATE INDEX IF NOT EXISTS idx_card_responses_card ON card_responses(card_id,id DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_card_undo_once ON card_responses(answer_id) WHERE action='undo';
