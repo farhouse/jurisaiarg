@@ -68,6 +68,8 @@ services:
       <<: *crawler_environment
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
       JURISAI_PILOT_MODEL: "${JURISAI_PILOT_MODEL:-nvidia/nemotron-3.5-super-vl:free}"
+      JURISAI_PILOT_MAX_TOKENS: "${JURISAI_PILOT_MAX_TOKENS:-32768}"
+      JURISAI_PILOT_REASONING_TOKENS: "${JURISAI_PILOT_REASONING_TOKENS:-4096}"
     volumes:
       - juris_ai_models:/models
     depends_on:

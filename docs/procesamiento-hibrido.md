@@ -312,6 +312,8 @@ Configurar en el `.env` que lee el stack, o en las variables de Dockhand:
 ```dotenv
 OPENROUTER_API_KEY=tu_clave
 JURISAI_PILOT_MODEL=nvidia/nemotron-3.5-super-vl:free
+JURISAI_PILOT_MAX_TOKENS=32768
+JURISAI_PILOT_REASONING_TOKENS=4096
 ```
 
 El Compose pasa la clave solamente a `crawler`; el nombre del modelo también
@@ -319,6 +321,21 @@ llega a `web` para fijarlo al crear el piloto. Un `.env` no envía por sí solo
 variables nuevas a los contenedores: hay que usar el Compose actualizado y
 recrearlos. `.env` queda fuera de Git y `.env.example` no contiene secretos.
 La clave nunca se guarda en el piloto, en el navegador o en los logs.
+
+El presupuesto total de salida incluye razonamiento y JSON. El piloto solicita
+32.768 tokens totales y limita el razonamiento a 4.096 en endpoints que anuncian
+ese soporte. En modelos sin razonamiento se omite ese parámetro. La comprobación
+previa valida los presupuestos y el límite de salida anunciado por el endpoint.
+Cada intento conserva sus ajustes, motivo de finalización, consumo total y tokens
+de razonamiento informados; no guarda el razonamiento interno ni respuestas parciales.
+Los ajustes forman parte de la clave de reutilización entre pilotos.
+
+Un error `length` significa que se agotó la salida, no que falte cupo. Revisar
+estos presupuestos, recrear `crawler` y usar **Retomar piloto**; las fichas ya
+terminadas se conservan. Una norma que siga excediendo el presupuesto queda
+pendiente de análisis por partes. No se recorta ni se acepta un JSON incompleto.
+Las solicitudes de generación tienen un tiempo de espera de 360 segundos; un
+fallo de conexión también conserva el trabajo previo.
 
 1. Entrar como administrador en **Gestión → Pilotos** y elegir un lote terminado.
 2. Pulsar **Analizar muestra del lote**. El trabajador conserva el HTML y su

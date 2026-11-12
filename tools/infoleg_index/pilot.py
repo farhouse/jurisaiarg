@@ -29,12 +29,12 @@ class PilotError(Exception):
         self.metadata = metadata or {}
 
 
-def request_json(path, key, payload=None):
+def request_json(path, key, payload=None, timeout=120):
     request = Request('https://openrouter.ai/api/v1/' + path,
         data=json.dumps(payload).encode() if payload is not None else None,
         headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
     try:
-        with urlopen(request, timeout=120) as response:
+        with urlopen(request, timeout=timeout) as response:
             raw = response.read(8 * 1024 * 1024 + 1)
             if len(raw) > 8 * 1024 * 1024:
                 raise PilotError('La respuesta supera el límite del piloto; no se utilizó parcialmente.')
@@ -49,6 +49,17 @@ def request_json(path, key, payload=None):
         raise PilotError('No se pudo completar la conexión con OpenRouter. Podés retomar sin perder resultados.') from None
     except (ValueError, UnicodeError):
         raise PilotError('OpenRouter devolvió una respuesta que no es JSON válido.') from None
+
+
+def generation_settings():
+    try:
+        output = int(os.environ.get('JURISAI_PILOT_MAX_TOKENS','32768'))
+        reasoning = int(os.environ.get('JURISAI_PILOT_REASONING_TOKENS','4096'))
+    except ValueError:
+        raise PilotError('JURISAI_PILOT_MAX_TOKENS y JURISAI_PILOT_REASONING_TOKENS deben ser números enteros.') from None
+    if not 2048<=output<=131072 or not 1024<=reasoning<=output-1024:
+        raise PilotError('El presupuesto de salida debe estar entre 2048 y 131072 tokens; el de razonamiento debe ser al menos 1024 y dejar otros 1024 para la ficha.')
+    return {'max_tokens':output,'reasoning':{'max_tokens':reasoning}}
 
 
 def preflight(model):
@@ -69,26 +80,36 @@ def preflight(model):
             eligible.append(endpoint)
     if not eligible:
         raise PilotError('El modelo fijo no tiene endpoints gratuitos con salida estructurada disponibles. No se eligió otro modelo.')
+    settings = generation_settings()
+    reasoning_endpoints = [e for e in eligible if 'reasoning' in e.get('supported_parameters',[])]
+    if reasoning_endpoints:
+        eligible = reasoning_endpoints
+    else:
+        settings.pop('reasoning')
+    limits = [e['max_completion_tokens'] for e in eligible if isinstance(e.get('max_completion_tokens'),int) and e['max_completion_tokens']>0]
+    if limits and settings['max_tokens']>min(limits):
+        raise PilotError(f"El presupuesto de salida supera el límite de {min(limits)} tokens del endpoint. Reducí JURISAI_PILOT_MAX_TOKENS y retomá.")
     return {'context_length': min(e.get('context_length') or 0 for e in eligible),
-            'endpoints': [e.get('name', e.get('provider_name', '')) for e in eligible]}
+            'endpoints': [e.get('name', e.get('provider_name', '')) for e in eligible], 'request_settings':settings}
 
 
-def infer(snapshot, laya, model, capacity):
+def infer(snapshot, laya, model, capacity, settings=None):
     # Bytes UTF-8 son un límite superior conservador de tokens del documento; no se recorta texto.
     content = json.dumps({'identity': snapshot['identity'], 'units': snapshot['units'],
         'candidates':snapshot['candidates'],'unverified_resources':analysis_resources(snapshot.get('resources_not_checked',[])),
         'laya':[{k:v for k,v in r.items() if k!='seconds'} for r in laya.get('relations',[])]},ensure_ascii=False)
-    if capacity <= 0 or len((INSTRUCTIONS + content).encode()) + 12000 > capacity:
+    settings = settings or generation_settings()
+    if capacity <= 0 or len((INSTRUCTIONS + content + json.dumps(SCHEMA)).encode()) + settings['max_tokens'] + 4096 > capacity:
         raise PilotError('La entrada completa excede el presupuesto conservador del contexto; requiere un análisis por partes. No se truncó.')
     payload = {'model': model, 'messages': [{'role': 'system', 'content': INSTRUCTIONS},
-        {'role': 'user', 'content': content}], 'temperature': 0, 'max_tokens': 8192,
+        {'role': 'user', 'content': content}], 'temperature': 0, **settings,
         'provider': {'require_parameters': True, 'max_price': {'prompt': 0, 'completion': 0}},
         'response_format': {'type': 'json_schema', 'json_schema': {'name': 'jurisai_norm', 'strict': True, 'schema': SCHEMA}}}
     started = time.monotonic()
     try:
-        raw, headers = request_json('chat/completions', os.environ['OPENROUTER_API_KEY'].strip(), payload)
+        raw, headers = request_json('chat/completions', os.environ['OPENROUTER_API_KEY'].strip(), payload,timeout=360)
     except PilotError as exc:
-        exc.metadata = {'requested':True,'seconds':round(time.monotonic()-started,3)}
+        exc.metadata.update(requested=True,seconds=round(time.monotonic()-started,3),max_tokens=payload['max_tokens'],request_settings=settings)
         raise
     if not isinstance(raw,dict):
         raise PilotError('OpenRouter devolvió una respuesta con estructura inesperada.',{'requested':True})
@@ -100,19 +121,55 @@ def infer(snapshot, laya, model, capacity):
     raw_usage = raw.get('usage') if isinstance(raw.get('usage'),dict) else {}
     usage = {k:v for k,v in raw_usage.items() if k in ('prompt_tokens','completion_tokens','total_tokens','cost')
              and isinstance(v,(int,float)) and not isinstance(v,bool) and 0<=v<=10**12 and math.isfinite(v)}
-    choices = raw.get('choices') or []
+    details = raw_usage.get('completion_tokens_details')
+    reasoning_tokens = details.get('reasoning_tokens') if isinstance(details,dict) else None
+    if isinstance(reasoning_tokens,int) and not isinstance(reasoning_tokens,bool) and 0<=reasoning_tokens<=10**12:
+        usage['reasoning_tokens'] = reasoning_tokens
+    choices = raw.get('choices')
+    choice = choices[0] if isinstance(choices,list) and choices and isinstance(choices[0],dict) else {}
+    message = choice.get('message') if isinstance(choice.get('message'),dict) else {}
+    content = message.get('content')
     metadata = {'requested':True,'model':safe_text(raw.get('model')),'provider':safe_text(raw.get('provider')),'request_id':safe_text(raw.get('id')),
-        'usage':usage,'seconds':round(time.monotonic()-started,3),
+        'usage':usage,'seconds':round(time.monotonic()-started,3),'max_tokens':payload['max_tokens'],'request_settings':settings,
+        'finish_reason':safe_text(choice.get('finish_reason')),'native_finish_reason':safe_text(choice.get('native_finish_reason')),
+        'content_chars':len(content) if isinstance(content,str) else 0,'refusal':bool(message.get('refusal')),
         'remaining_requests':remaining('x-ratelimit-remaining-requests'),'remaining_tokens':remaining('x-ratelimit-remaining-tokens')}
-    if not isinstance(choices,list) or not choices or not isinstance(choices[0],dict) or choices[0].get('finish_reason') != 'stop':
-        raise PilotError('La respuesta quedó incompleta o fue rechazada; no se aceptó una ficha parcial.', metadata)
     if usage.get('cost',0)>0:
         raise PilotError('El servicio informó un coste distinto de cero. Se detuvo el piloto; revisá OpenRouter antes de retomar.',metadata)
+    error = raw.get('error') or choice.get('error')
+    if error:
+        error = error if isinstance(error,dict) else {}
+        error_details = error.get('metadata') if isinstance(error.get('metadata'),dict) else {}
+        error_type = error_details.get('error_type')
+        code = error.get('code')
+        metadata.update(error_code=code if isinstance(code,int) else None,error_type=safe_text(error_type))
+        if code==429 or error_type=='rate_limit_exceeded':
+            reason = 'OpenRouter informó que se agotó el cupo o límite temporal. Esperá y retomá el piloto.'
+        elif error_type=='context_length_exceeded':
+            reason = 'El proveedor informó que la entrada y la salida exceden su contexto. Esta norma requiere análisis por partes.'
+        elif error_type in ('content_filter','refusal') or code==403:
+            reason = 'El proveedor rechazó esta solicitud. Revisá la entrada y las restricciones del modelo en OpenRouter antes de retomar.'
+        else:
+            reason = 'El proveedor falló durante la generación. Retomá el piloto más tarde; si se repite, consultá el intento en OpenRouter.'
+        raise PilotError(reason+' No se aceptó una ficha parcial.',metadata)
+    finish = choice.get('finish_reason')
+    if finish=='length':
+        counts = f" Tokens de salida informados: {usage['completion_tokens']}." if 'completion_tokens' in usage else ''
+        if 'reasoning_tokens' in usage: counts += f" De razonamiento: {usage['reasoning_tokens']}."
+        raise PilotError(f"El modelo alcanzó el límite de salida de {payload['max_tokens']} tokens antes de terminar la ficha.{counts} "
+            'Revisá JURISAI_PILOT_MAX_TOKENS y JURISAI_PILOT_REASONING_TOKENS en el crawler; si el límite vuelve a resultar insuficiente, la norma requiere análisis por partes. '
+            'Esperar cupo no resuelve este corte. No se aceptó una ficha parcial.',metadata)
+    if finish=='content_filter' or message.get('refusal'):
+        raise PilotError('El proveedor o el modelo rechazó la solicitud. Revisá la entrada y las restricciones del modelo en OpenRouter antes de retomar. No se aceptó una ficha parcial.',metadata)
+    if finish!='stop':
+        raise PilotError('OpenRouter no informó una finalización normal de la ficha. Retomá el piloto; si se repite, consultá el intento en OpenRouter. No se aceptó una ficha parcial.',metadata)
+    if not isinstance(content,str) or not content.strip():
+        raise PilotError('El modelo terminó sin devolver la ficha. Retomá el piloto; si se repite, revisá el consumo de razonamiento del intento en OpenRouter.',metadata)
     returned = raw.get('model', '')
     if not isinstance(returned,str) or returned.removesuffix(':free') != model.removesuffix(':free'):
         raise PilotError('El servicio informó un modelo diferente del solicitado; el resultado no se aceptó.', metadata)
     try:
-        result = json.loads(choices[0]['message']['content'])
+        result = json.loads(content)
         validate_result(result, snapshot)
     except (KeyError, TypeError, ValueError):
         raise PilotError('La ficha no cumple el esquema, la cobertura o la evidencia literal. Revisá el intento y retomá con instrucciones corregidas.', metadata) from None
@@ -308,11 +365,12 @@ def laya_stage(con, pilot_id, report):
 def analyze(con, pilot_id, job_id, report):
     model, config = con.execute('SELECT model,config FROM analysis_pilots WHERE id=%s', (pilot_id,)).fetchone()
     capacity = config['endpoint']['context_length']
+    settings = config['endpoint'].get('request_settings') or generation_settings()
     rows = con.execute('SELECT id,snapshot,laya,status,fingerprint FROM analysis_pilot_items WHERE pilot_id=%s ORDER BY id', (pilot_id,)).fetchall()
     for done, (pk, snapshot, laya, status, key) in enumerate(rows, 1):
         if status == 'done':
             continue
-        cache_key = fingerprint([key,model,VERSION,PROMPT_VERSION,laya.get('revision'),analysis_resources(snapshot.get('resources_not_checked',[])),
+        cache_key = fingerprint([key,model,VERSION,PROMPT_VERSION,settings,laya.get('revision'),analysis_resources(snapshot.get('resources_not_checked',[])),
             [{k:v for k,v in r.items() if k!='seconds'} for r in laya.get('relations',[])]])
         previous = con.execute('''SELECT result,metadata FROM analysis_pilot_items WHERE status='done'
             AND metadata->>'cache_key'=%s ORDER BY id LIMIT 1''', (cache_key,)).fetchone()
@@ -322,7 +380,7 @@ def analyze(con, pilot_id, job_id, report):
                 result, metadata = previous
                 metadata = {**{k:v for k,v in metadata.items() if not k.startswith('reference_') and k not in ('search_queries','attempts')}, 'reused': True}
             else:
-                result, metadata = infer(snapshot, laya, model, capacity)
+                result, metadata = infer(snapshot, laya, model, capacity,settings)
                 metadata.update(cache_key=cache_key, contract=VERSION, prompt=PROMPT_VERSION, reused=False)
             con.execute("""UPDATE analysis_pilot_items SET status='done',result=%s,
                 metadata=metadata || %s || jsonb_build_object('attempts',coalesce(metadata->'attempts','[]') || %s),error='' WHERE id=%s""",

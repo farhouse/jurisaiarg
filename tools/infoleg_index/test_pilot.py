@@ -76,13 +76,16 @@ class PilotContractTest(unittest.TestCase):
                 self.assertEqual(payload['provider']['max_price'],{'prompt':0,'completion':0})
                 self.assertTrue(payload['provider']['require_parameters'])
                 self.assertTrue(payload['response_format']['json_schema']['strict'])
+                self.assertEqual(payload['max_tokens'],32768)
+                self.assertEqual(payload['reasoning'],{'max_tokens':4096})
+                self.assertEqual(api.call_args.kwargs['timeout'],360)
                 self.assertNotIn('models',payload)
             for response_bad in ({**response,'model':'different-model'},
                 {**response,'usage':{'total_tokens':100,'cost':0.01}},
                 {**response,'choices':[{'finish_reason':'length'}]},
                 {**response,'choices':[{'finish_reason':'stop','message':{'content':'{}'}}]}):
                 with patch('pilot.request_json',return_value=(response_bad,{})),self.assertRaises(pilot.PilotError):
-                    pilot.infer(snapshot,{},DEFAULT_MODEL,1000000)
+                    pilot.infer(snapshot,{},DEFAULT_MODEL,1000000,{'max_tokens':8192})
             with patch('pilot.request_json') as api,self.assertRaises(pilot.PilotError):
                 pilot.infer(snapshot,{},DEFAULT_MODEL,10)
             api.assert_not_called()
@@ -90,6 +93,47 @@ class PilotContractTest(unittest.TestCase):
         with patch('pilot.urlopen',side_effect=HTTPError('url',401,'test-secret',{},None)):
             with self.assertRaises(pilot.PilotError) as caught: pilot.request_json('test','test-secret')
             self.assertNotIn('test-secret',str(caught.exception))
+
+    def test_incomplete_responses_keep_safe_diagnostics_and_distinguish_causes(self):
+        snapshot=fixture();result=pilot.reference_draft(snapshot)
+        response={'model':DEFAULT_MODEL,'provider':'test','id':'gen-test',
+            'usage':{'completion_tokens':8192,'completion_tokens_details':{'reasoning_tokens':8192}},
+            'choices':[{'finish_reason':'length','native_finish_reason':'max_tokens','message':{'content':''}}]}
+        cases=[(response,'límite de salida de 8192'),
+            ({**response,'choices':[{'finish_reason':'content_filter','message':{'refusal':'test-secret'}}]},'rechazó'),
+            ({**response,'choices':[{'finish_reason':'stop','message':{'content':json.dumps(result),'refusal':'test-secret'}}]},'rechazó'),
+            ({**response,'choices':[{'finish_reason':'stop','message':{'content':''}}]},'sin devolver la ficha'),
+            ({**response,'choices':None,'error':{'code':429,'message':'test-secret'}},'cupo o límite temporal'),
+            ({**response,'choices':[{'finish_reason':'error','error':{'code':502,'message':'test-secret',
+                'metadata':{'error_type':'provider_unavailable'}}}]},'falló durante la generación'),
+            ({**response,'choices':{},'error':{'code':400,'metadata':{'error_type':'context_length_exceeded'}}},'análisis por partes'),
+            ({**response,'choices':[{'finish_reason':'error','native_finish_reason':'test-secret'}]},'finalización normal')]
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'test-secret'}):
+            for raw,expected in cases:
+                with self.subTest(cause=expected),patch('pilot.request_json',return_value=(raw,{})),self.assertRaises(pilot.PilotError) as caught:
+                    pilot.infer(snapshot,{},DEFAULT_MODEL,1000000,{'max_tokens':8192})
+                self.assertIn(expected,str(caught.exception))
+                meta=caught.exception.metadata
+                self.assertEqual(meta['request_id'],'gen-test')
+                self.assertEqual(meta['max_tokens'],8192)
+                self.assertEqual(meta['usage']['reasoning_tokens'],8192)
+                self.assertNotIn('test-secret',str(caught.exception)+json.dumps(meta))
+                self.assertNotIn('content',meta)
+
+    def test_generation_budgets_are_validated_and_frozen_after_capability_check(self):
+        endpoint={'context_length':1000000,'max_completion_tokens':65536,'pricing':{'prompt':'0','completion':'0'},
+            'supported_parameters':['structured_outputs','response_format','reasoning']}
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'test-secret','JURISAI_PILOT_MAX_TOKENS':'32768','JURISAI_PILOT_REASONING_TOKENS':'4096'}):
+            with patch('pilot.request_json',return_value=({'data':{'endpoints':[endpoint]}},{})):
+                self.assertEqual(pilot.preflight(DEFAULT_MODEL)['request_settings'],{'max_tokens':32768,'reasoning':{'max_tokens':4096}})
+            without_reasoning={**endpoint,'supported_parameters':['structured_outputs','response_format']}
+            with patch('pilot.request_json',return_value=({'data':{'endpoints':[without_reasoning]}},{})):
+                self.assertEqual(pilot.preflight(DEFAULT_MODEL)['request_settings'],{'max_tokens':32768})
+            with patch('pilot.request_json',return_value=({'data':{'endpoints':[{**endpoint,'max_completion_tokens':16000}]}},{})),self.assertRaises(pilot.PilotError):
+                pilot.preflight(DEFAULT_MODEL)
+            for output,reasoning in [('texto','4096'),('32768','0'),('4096','4096'),('200000','4096')]:
+                with self.subTest(output=output,reasoning=reasoning),patch.dict(os.environ,{'JURISAI_PILOT_MAX_TOKENS':output,'JURISAI_PILOT_REASONING_TOKENS':reasoning}),self.assertRaises(pilot.PilotError):
+                    pilot.generation_settings()
 
 
 @unittest.skipUnless(os.getenv('CRAWLER_TEST_DSN'),'requiere PostgreSQL test_ aislado')
@@ -123,11 +167,18 @@ class PilotIntegrationTest(unittest.TestCase):
             con.execute("UPDATE analysis_pilots SET config=config || %s WHERE id=%s",(Jsonb({'endpoint':{'context_length':1000000}}),pk))
             con.execute("UPDATE analysis_pilot_items SET metadata=%s WHERE id=%s",(Jsonb({'reference_authors':{'summary':'first'},'reference_decisions':{'summary':'confirmed'}}),item))
             con.commit()
+            failed={'requested':True,'finish_reason':'length','usage':{'completion_tokens':8192,'reasoning_tokens':8192}}
+            with patch('pilot.infer',side_effect=pilot.PilotError('Límite de salida.',failed)),self.assertRaises(pilot.PilotError):
+                pilot.analyze(con,pk,job,lambda *a,**k:None)
+            state=con.execute('SELECT status,result,reference,metadata FROM analysis_pilot_items WHERE id=%s',(item,)).fetchone()
+            self.assertEqual(state[0],'error');self.assertFalse(state[1]);self.assertEqual(state[2],reference)
+            self.assertEqual(state[3]['attempts'],[failed])
             with patch('pilot.infer',return_value=(reference,meta)) as infer:
                 pilot.analyze(con,pk,job,lambda *a,**k:None)
                 self.assertEqual(infer.call_count,1)
                 pilot.analyze(con,pk,job,lambda *a,**k:None)
                 self.assertEqual(infer.call_count,1)
+            self.assertEqual(len(con.execute('SELECT metadata FROM analysis_pilot_items WHERE id=%s',(item,)).fetchone()[0]['attempts']),2)
             job2 = con.execute("INSERT INTO crawl_jobs(submission_id,start_id,end_id,requested_by,mode,crawl_run_id) VALUES(%s,170001,170001,'test','pilot',%s) RETURNING id",(uuid.uuid4(),run)).fetchone()[0]
             pk2 = con.execute("INSERT INTO analysis_pilots(job_id,crawl_run_id,model,config) SELECT %s,crawl_run_id,model,config FROM analysis_pilots WHERE id=%s RETURNING id",(job2,pk)).fetchone()[0]
             con.execute("INSERT INTO analysis_pilot_items(pilot_id,norm_id,snapshot,reference,split,fingerprint,metadata) SELECT %s,norm_id,snapshot,reference,split,fingerprint,%s FROM analysis_pilot_items WHERE id=%s",(pk2,Jsonb({'reference_authors':{'summary':'second'},'reference_decisions':{'summary':'legal'}}),item))
@@ -138,6 +189,15 @@ class PilotIntegrationTest(unittest.TestCase):
             self.assertEqual(metadata['reference_authors']['summary'],'second')
             self.assertEqual(metadata['reference_decisions']['summary'],'legal')
             self.assertEqual(metadata['attempts'],[])
+            # Otro presupuesto no reutiliza una respuesta producida con ajustes distintos.
+            con.execute("UPDATE analysis_pilot_items SET status='pending',result='{}' WHERE pilot_id=%s",(pk2,))
+            con.execute("UPDATE analysis_pilots SET config=jsonb_set(config,'{endpoint,request_settings}',%s) WHERE id=%s",
+                (Jsonb({'max_tokens':49152,'reasoning':{'max_tokens':4096}}),pk2))
+            con.commit()
+            with patch('pilot.infer',return_value=(reference,meta)) as infer:
+                pilot.analyze(con,pk2,job2,lambda *a,**k:None)
+                self.assertEqual(infer.call_count,1)
+                self.assertEqual(infer.call_args.args[4]['max_tokens'],49152)
             # El modo directo congela la muestra y continúa sin ninguna evaluación humana.
             con.execute("UPDATE analysis_pilots SET phase='prepare',config=config || %s WHERE id=%s",(Jsonb({'reference_required':False}),pk2))
             con.commit()
