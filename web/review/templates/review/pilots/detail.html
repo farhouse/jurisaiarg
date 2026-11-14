@@ -6,7 +6,8 @@
 <header class="work-heading"><div><h1>{% if pilot.config.group %}Grupo de normas{% else %}Análisis{% endif %} {{ pilot.pk }}</h1><p>{{ pilot.crawl_run.label }} · <span id="pilot-status">{{ pilot.status_label }}</span></p></div><a class="button" href="{% url 'review:pilot_export' pilot.pk %}">Exportar muestra y resultados</a></header>
 {% if pilot.config.source_pilot_id %}<p>Fuentes seleccionadas del <a href="{% url 'review:pilot_detail' pilot.config.source_pilot_id %}">piloto {{ pilot.config.source_pilot_id }}</a>, en otra ejecución.</p>{% endif %}
 {% if pilot.config.group_pilot_id %}<p><a href="{% url 'review:pilot_detail' pilot.config.group_pilot_id %}">Volver al grupo de normas</a>. Este bloque contiene únicamente las normas seleccionadas.</p>{% endif %}
-{% if error %}<div class="review-errors" role="alert"><h2>No se pudo iniciar el análisis</h2><p>{{ error }}</p></div>{% endif %}
+{% if pilot.archived_at %}<div class="message"><h2>Piloto archivado</h2><p>Archivado por {{ pilot.archived_by }} el {{ pilot.archived_at|date:'d/m/Y H:i' }}. Sus fuentes, resultados y respuestas se conservan. Restauralo para trabajar con él.</p><form method="post" action="{% url 'review:pilot_archive' pilot.pk %}">{% csrf_token %}<button class="button" name="action" value="restore">Restaurar piloto</button></form></div>{% endif %}
+{% if error %}<div class="review-errors" role="alert"><h2>No se pudo iniciar el análisis</h2><p>{{ error }}</p>{% if conflict_pilot %}<a class="button" href="{% url 'review:pilot_detail' conflict_pilot.pk %}">Abrir análisis {{ conflict_pilot.pk }}</a>{% endif %}</div>{% endif %}
 <div id="pilot-live" data-progress-url="{% url 'review:pilot_progress' pilot.pk %}" data-active="{{ pilot.job.active|yesno:'true,false' }}">
 <div id="pilot-progress">{% include 'review/pilots/progress.html' %}</div>
 <p id="pilot-live-status" class="muted" role="status" aria-live="polite"></p>
@@ -20,7 +21,7 @@
 <button class="button primary">Analizar normas seleccionadas</button></form></details>
 {% endif %}
 {% if executions %}<section class="panel"><h2>Bloques de este grupo</h2><ul>{% for execution in executions %}<li><a href="{% url 'review:pilot_detail' execution.pk %}">Análisis {{ execution.pk }}</a> · {{ execution.coverage.selected }} normas · {{ execution.status_label }}</li>{% endfor %}</ul></section>{% endif %}
-{% if items and not pilot.config.group %}
+{% if items and not pilot.config.group and not pilot.archived_at %}
 <section class="panel"><h2>Tarjetas para colaboradores</h2>
 <p>{{ published_cards }} tarjetas habilitadas. Cada respuesta evalúa un tema o un resumen; conserva su propio historial y no aprueba la norma completa.</p>
 <form method="post" action="{% url 'review:card_publication' pilot.pk %}">{% csrf_token %}<button class="button primary" name="action" value="publish" {% if not completed %}disabled{% endif %}>{% if pilot.config.cards_enabled %}Actualizar tarjetas disponibles{% else %}Habilitar tarjetas disponibles{% endif %}</button>{% if pilot.config.cards_enabled %} <button class="button" name="action" value="withdraw">Retirar muestra</button>{% endif %}</form>
@@ -52,4 +53,5 @@
 {% endif %}
 <details class="panel"><summary>Cobertura y límites de la muestra</summary>{% for limit in pilot.coverage.limitations %}<p>{{ limit }}</p>{% endfor %}<ul>{% for exclusion in pilot.coverage.excluded %}<li>InfoLEG {{ exclusion.infoleg_id }}: {{ exclusion.reason }}</li>{% empty %}<li>No se excluyeron normas por ausencia de HTML.</li>{% endfor %}</ul></details>
 {% endif %}
+{% if not pilot.job.active and not pilot.archived_at %}<section class="panel"><h2>Archivar {% if pilot.config.group %}grupo{% else %}análisis{% endif %}</h2><p>Lo quita del listado principal y retira sus tarjetas. Las fuentes, resultados, respuestas y enlaces históricos se conservan. Podés recuperarlo en «Archivados».{% if pilot.config.group %} Sus bloques se archivan por separado; detené primero cualquier análisis activo del grupo.{% endif %}</p><form method="post" action="{% url 'review:pilot_archive' pilot.pk %}">{% csrf_token %}<button class="button" name="action" value="archive">Archivar {% if pilot.config.group %}grupo{% else %}análisis{% endif %}</button></form></section>{% endif %}
 {% endblock %}

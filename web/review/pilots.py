@@ -7,6 +7,7 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 from django import forms
+from django.contrib import messages
 from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Value,TextField
@@ -21,7 +22,7 @@ from django.views.decorators.http import require_http_methods, require_GET
 
 from .models import AnalysisPilot, AnalysisPilotItem, AnalysisPilotEvaluation, CrawlJob, CrawlRun, Norm, ReviewCard
 from .pilot_contract import (BLOCKS, DEFAULT_MODEL, VERSION, PROMPT_VERSION, analysis_resources,
-    request_budget, DEFAULT_MAX_TOKENS, DEFAULT_REASONING_TOKENS, STAGE_CHOICES, processing_stages, norm_groups)
+    request_budget, DEFAULT_MAX_TOKENS, DEFAULT_REASONING_TOKENS, STAGE_CHOICES, processing_stages, norm_groups, overlapping_stages)
 from .pilot_forms import BlockForm
 from .workflow import staff_required
 
@@ -149,9 +150,33 @@ def latest_reviews(item, phase, user_id=None):
     return {row.block: row for row in query.order_by('id')}
 
 
+def work_record(pilot, config=None, norm_ids=None):
+    return {'id':pilot.pk,'crawl_run_id':pilot.crawl_run_id,'config':config if config is not None else pilot.config,
+        'norm_ids':norm_ids if norm_ids is not None else list(pilot.items.values_list('norm_id',flat=True))}
+
+
+def active_conflict(record, exclude=None):
+    for other in AnalysisPilot.objects.filter(crawl_run_id=record['crawl_run_id'],job__status__in=['queued','running']).exclude(pk=exclude).select_related('job').prefetch_related('items').order_by('id'):
+        stages = overlapping_stages(record,work_record(other))
+        if stages:
+            return other, ' + '.join('Laya' if s=='laya' else 'LLM' for s in stages)
+    return None, ''
+
+
+def root_group(pilot):
+    seen = set()
+    while pilot.config.get('source_pilot_id') and not pilot.config.get('group_pilot_id') and pilot.pk not in seen:
+        seen.add(pilot.pk)
+        parent = AnalysisPilot.objects.filter(pk=pilot.config['source_pilot_id']).first()
+        if not parent: break
+        pilot = parent
+    return pilot.config.get('group_pilot_id') or pilot.pk
+
+
 @staff_required
 @require_http_methods(['GET','POST'])
 def index(request):
+    conflict = None
     grouping = request.POST.get('action')=='groups'
     group_form = GroupForm(request.POST if grouping else None,auto_id='group_%s')
     if request.method=='POST' and grouping and group_form.is_valid():
@@ -164,6 +189,14 @@ def index(request):
     if request.method=='POST' and not grouping and form.is_valid():
         run = form.cleaned_data['run']
         with transaction.atomic():
+            # Serializa altas y reanudaciones del mismo lote, incluso desde pestañas distintas.
+            CrawlRun.objects.select_for_update().get(pk=run.pk)
+            existing = AnalysisPilot.objects.filter(job__submission_id=form.cleaned_data['submission_id']).first()
+            record = {'crawl_run_id':run.pk,'config':{'stages':form.cleaned_data['stages']}}
+            conflict, stages = active_conflict(record) if not existing else (None,'')
+            if conflict:
+                form.add_error(None,f'Ya hay un análisis de {stages} en cola o en curso sobre estas normas. Abrí el trabajo existente o detenelo antes de iniciar otro.')
+                return render_index(request,form,group_form,conflict,status=409)
             job, _ = CrawlJob.objects.get_or_create(submission_id=form.cleaned_data['submission_id'], defaults={
                 'mode':'pilot','start_id':min(run.requested_ids),'end_id':min(run.requested_ids),
                 'crawl_run':run,'requested_by':request.user.username,'created_at':timezone.now()})
@@ -180,8 +213,14 @@ def index(request):
                     form.add_error(None,'Esta solicitud ya creó otro piloto. Recargá antes de cambiar el modelo, los límites o el lote.')
                 else:
                     return redirect('review:pilot_detail', pk=pilot.pk)
-    return render(request,'review/pilots/index.html',{'form':form,'group_form':group_form,'pilots':AnalysisPilot.objects.select_related('job','crawl_run')[:50]},
-                  status=400 if request.method=='POST' else 200)
+    return render_index(request,form,group_form,conflict,status=400 if request.method=='POST' else 200)
+
+
+def render_index(request, form, group_form, conflict=None, status=200):
+    archived = request.GET.get('archivados')=='1'
+    pilots = AnalysisPilot.objects.filter(archived_at__isnull=not archived).select_related('job','crawl_run')
+    return render(request,'review/pilots/index.html',{'form':form,'group_form':group_form,'pilots':pilots[:50],
+        'show_archived':archived,'conflict_pilot':conflict},status=status)
 
 
 def report_data(pilot):
@@ -259,29 +298,38 @@ def report_data(pilot):
 def detail(request, pk):
     pilot = get_object_or_404(AnalysisPilot.objects.select_related('job','crawl_run'),pk=pk)
     error = ''
+    conflict = None
     model_form = None
     if request.method=='POST':
         with transaction.atomic():
-            pilot = AnalysisPilot.objects.select_for_update().select_related('job').get(pk=pk)
+            CrawlRun.objects.select_for_update().get(pk=pilot.crawl_run_id)
+            pilot = AnalysisPilot.objects.select_for_update(of=('self',)).select_related('job').get(pk=pk)
             job = CrawlJob.objects.select_for_update().get(pk=pilot.job_id)
-            if job.active:
+            if pilot.archived_at:
+                error = 'Este piloto está archivado. Restauralo antes de volver a analizarlo.'
+            elif job.active:
                 error = 'El trabajo ya está en cola o ejecutándose.'
             elif request.POST.get('action')=='compare_model' and pilot.items.exists():
                 model_form = ModelForm(request.POST,items=pilot.items.all())
                 if model_form.is_valid():
+                    config = {k:pilot.config[k] for k in ('contract','prompt') if k in pilot.config}
+                    config.update(reference_required=False,source_pilot_id=pilot.pk,
+                        source_item_ids=sorted(model_form.cleaned_data['items'].values_list('pk',flat=True)),
+                        stages=model_form.cleaned_data['stages'],request_settings=model_form.cleaned_data['request_settings'],
+                        group_pilot_id=root_group(pilot))
+                    existing = AnalysisPilot.objects.filter(job__submission_id=model_form.cleaned_data['submission_id']).first()
+                    conflict, stages = active_conflict(work_record(pilot,config,
+                        list(model_form.cleaned_data['items'].values_list('norm_id',flat=True)))) if not existing else (None,'')
+                    if conflict:
+                        error = f'Ya hay un análisis de {stages} en cola o en curso para este grupo. Abrí el trabajo existente o detenelo antes de iniciar otro.'
+                        model_form.add_error(None,error)
+                if model_form.is_valid() and not error:
                     new_job,_ = CrawlJob.objects.get_or_create(submission_id=model_form.cleaned_data['submission_id'],defaults={
                         'mode':'pilot','start_id':job.start_id,'end_id':job.end_id,'crawl_run':pilot.crawl_run,
                         'requested_by':request.user.username,'created_at':timezone.now()})
                     if new_job.mode!='pilot':
                         error = 'Esta solicitud pertenece a otro trabajo. Recargá antes de continuar.'
                     else:
-                        config = {k:pilot.config[k] for k in ('contract','prompt') if k in pilot.config}
-                        config.update(reference_required=False,source_pilot_id=pilot.pk,
-                            source_item_ids=sorted(model_form.cleaned_data['items'].values_list('pk',flat=True)),
-                            stages=model_form.cleaned_data['stages'],request_settings=model_form.cleaned_data['request_settings'])
-                        group_id = pilot.pk if pilot.config.get('group') else pilot.config.get('group_pilot_id')
-                        if group_id:
-                            config['group_pilot_id']=group_id
                         new_pilot,created = AnalysisPilot.objects.get_or_create(job=new_job,defaults={
                             'crawl_run':pilot.crawl_run,'model':model_form.cleaned_data['model'],'created_at':timezone.now(),
                             'status':'running','phase':'analyze','config':config,
@@ -310,6 +358,9 @@ def detail(request, pk):
                                     for item in selected_items])
                             return redirect('review:pilot_detail',pk=new_pilot.pk)
                 error = error or 'No se creó otro piloto. Revisá las normas, etapas y configuración indicadas abajo.'
+            elif request.POST.get('action') in ('analyze_now','analyze','resume') and (conflict_info := active_conflict(work_record(pilot),exclude=pilot.pk))[0]:
+                conflict, stages = conflict_info
+                error = f'Ya hay un análisis de {stages} en cola o en curso para este grupo. Abrí el trabajo existente o detenelo antes de retomar este.'
             elif request.POST.get('action')=='analyze_now' and pilot.phase=='prepare' and pilot.status=='reference' and pilot.items.exists():
                 # También permite continuar los pilotos creados antes de que la referencia fuera opcional.
                 pilot.config['reference_required'] = False
@@ -336,22 +387,23 @@ def detail(request, pk):
                         item.save(update_fields=['reference','metadata'])
                     pilot.reference_locked_at = timezone.now()
                     pilot.phase = 'analyze'
-            elif request.POST.get('action')=='resume' and pilot.status=='waiting':
+            elif request.POST.get('action')=='resume' and pilot.status in ('waiting','cancelled'):
                 pass
             else:
                 error = 'Esta acción no corresponde al estado actual del piloto.'
             if not error:
                 job.status, job.error, job.finished_at, job.stage = 'queued','',None,'queued'
                 job.heartbeat_at=job.last_activity_at=None
+                job.cancel_requested_at=None
                 job.progress={}
-                job.save(update_fields=['status','error','finished_at','stage','heartbeat_at','last_activity_at','progress'])
+                job.save(update_fields=['status','error','finished_at','stage','heartbeat_at','last_activity_at','progress','cancel_requested_at'])
                 pilot.status = 'preparing' if pilot.phase=='prepare' else 'running'
                 pilot.save(update_fields=['reference_locked_at','phase','status','config'])
                 return redirect('review:pilot_detail',pk=pk)
     data = report_data(pilot)
     effective = pilot.config.get('endpoint',{}).get('request_settings',{})
     requested = pilot.config.get('request_settings') or effective
-    if model_form is None and not pilot.job.active and data['items']:
+    if model_form is None and not pilot.job.active and not pilot.archived_at and data['items']:
         initial = {'submission_id':uuid.uuid4(),'model':pilot.model,
             'stages':['laya','llm'] if pilot.config.get('group') else ['llm'],
             'items':[] if pilot.config.get('group') else [i.pk for i in data['items']]}
@@ -373,13 +425,41 @@ def detail(request, pk):
         decorate_group(pilot,data['items'])
     selected_ids = model_form['items'].value() if model_form is not None else []
     data['selected_item_ids'] = [int(v) for v in selected_ids or [] if str(v).isdigit()]
-    data['executions'] = AnalysisPilot.objects.filter(config__group_pilot_id=pilot.pk).select_related('job') if pilot.config.get('group') else []
-    data.update(pilot=pilot,error=error,blocks=BLOCKS,model_form=model_form,request_settings=requested,
+    data['executions'] = AnalysisPilot.objects.filter(config__group_pilot_id=pilot.pk,archived_at__isnull=True).select_related('job') if pilot.config.get('group') else []
+    data.update(pilot=pilot,error=error,conflict_pilot=conflict,blocks=BLOCKS,model_form=model_form,request_settings=requested,
         selected_stages=processing_stages(pilot.config),processing_label=' + '.join('Laya' if s=='laya' else 'LLM' for s in processing_stages(pilot.config)),
         reasoning_omitted=bool(effective) and 'reasoning' not in effective,
         heartbeat_age=int((now-pilot.job.heartbeat_at).total_seconds()) if pilot.job.heartbeat_at else None,
         activity_age=int((now-pilot.job.last_activity_at).total_seconds()) if pilot.job.last_activity_at else None)
-    return render(request,'review/pilots/detail.html',data,status=400 if error else 200)
+    return render(request,'review/pilots/detail.html',data,status=409 if conflict else 400 if error else 200)
+
+
+@staff_required
+@require_http_methods(['POST'])
+def archive(request, pk):
+    pilot = get_object_or_404(AnalysisPilot,pk=pk)
+    with transaction.atomic():
+        CrawlRun.objects.select_for_update().get(pk=pilot.crawl_run_id)
+        pilot = AnalysisPilot.objects.select_for_update(of=('self',)).select_related('job').get(pk=pk)
+        pilot.job = CrawlJob.objects.select_for_update().get(pk=pilot.job_id)
+        action = request.POST.get('action')
+        if action not in ('archive','restore'):
+            return HttpResponse('Acción inválida.',status=400)
+        if action=='restore':
+            pilot.archived_at,pilot.archived_by=None,''
+            pilot.save(update_fields=['archived_at','archived_by'])
+            messages.success(request,'Piloto restaurado. Sus tarjetas permanecen retiradas hasta que las habilites.')
+        elif pilot.job.active or (pilot.config.get('group') and AnalysisPilot.objects.filter(
+                config__group_pilot_id=pk,job__status__in=['queued','running']).exists()):
+            messages.error(request,'Detené primero el trabajo y los análisis activos de este grupo. Archivá cuando el estado sea «Detenido».')
+            return redirect('review:pilot_detail',pk=pk)
+        elif not pilot.archived_at:
+            pilot.archived_at,pilot.archived_by=timezone.now(),request.user.username
+            pilot.config['cards_enabled']=False
+            pilot.save(update_fields=['archived_at','archived_by','config'])
+            ReviewCard.objects.filter(item__pilot=pilot).update(active=False)
+            messages.success(request,'Piloto archivado. Conservamos fuentes, resultados y respuestas; podés recuperarlo en «Archivados».')
+    return redirect('review:pilots')
 
 
 def decorate_progress(pilot, items):
@@ -401,7 +481,7 @@ def decorate_progress(pilot, items):
 
 
 def decorate_group(pilot, items):
-    children = AnalysisPilotItem.objects.filter(pilot__config__group_pilot_id=pilot.pk).select_related('pilot__job').order_by('-pilot_id','-pk')
+    children = AnalysisPilotItem.objects.filter(pilot__config__group_pilot_id=pilot.pk,pilot__archived_at__isnull=True).select_related('pilot__job').order_by('-pilot_id','-pk')
     laya, llm, latest = {}, {}, {}
     for child in children:
         decorate_progress(child.pilot,[child])
@@ -520,6 +600,8 @@ def render_item(request,item,bound=None,error='',status=200):
 def evaluate(request, pk, item_id):
     with transaction.atomic():
         pilot = get_object_or_404(AnalysisPilot.objects.select_for_update(),pk=pk)
+        if pilot.archived_at:
+            return JsonResponse({'error':'Este piloto está archivado. Restauralo antes de editar.'},status=409)
         item = get_object_or_404(AnalysisPilotItem.objects.select_for_update(),pk=item_id,pilot=pilot)
         phase = request.POST.get('phase')
         block = request.POST.get('block')

@@ -374,6 +374,31 @@ fallo de conexión también conserva el trabajo previo.
    fallido conserva las respuestas anteriores; **Retomar piloto** reutiliza las
    tareas terminadas cuando coinciden contenido y versiones.
 
+**Detener y limpiar trabajos:** el listado de Pilotos y el detalle de cada trabajo
+ofrecen **Detener trabajo**. En cola se retira inmediatamente; en curso muestra
+**Deteniendo…** hasta que el trabajador confirme **Detenido**. El supervisor
+interrumpe el subproceso de modelos; una descarga termina la operación actual
+antes de detenerse. Los resultados ya confirmados se conservan. Una solicitud ya
+enviada a OpenRouter puede terminar de procesarse en el proveedor. Si el trabajador
+está apagado, la solicitud permanece pendiente hasta que vuelva a conectarse.
+**Retomar piloto** continúa las tareas pendientes y reutiliza las compatibles.
+
+No se admite más de un análisis en cola o en curso de la misma etapa para un grupo,
+aunque cambien el modelo, los límites o las normas elegidas. Laya y LLM se pueden
+pedir por separado. La detención pendiente sigue reservando sus etapas hasta ser
+confirmada. Las muestras históricas sin grupo se contrastan por normas del mismo
+lote; las que todavía no tienen fuentes congeladas reservan el lote completo.
+El control se aplica también al retomar y a solicitudes simultáneas. El trabajador
+deja los duplicados antiguos de la cola en atención, sin ejecutarlos ni perder sus
+resultados.
+
+**Archivar** quita un piloto inactivo del listado principal y retira sus tarjetas;
+no elimina físicamente fuentes, resultados, evaluaciones, respuestas ni enlaces.
+**Ver archivados → Restaurar** lo recupera sin reactivar tarjetas automáticamente.
+Un piloto archivado permanece en modo lectura. Para archivar un grupo hay que
+detener antes sus análisis activos; los bloques se archivan por separado. Estas
+acciones requieren permisos administrativos y protección CSRF.
+
 **Pilotos anteriores detenidos en la referencia:** abrir el detalle del piloto y
 elegir **Analizar ahora**. Continúa sobre la muestra ya congelada sin exigir
 decisiones. Conserva los borradores e historial de referencia, sin presentarlos

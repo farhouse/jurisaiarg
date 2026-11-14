@@ -20,6 +20,21 @@ def processing_stages(config):
     return [s for s in ('laya','llm') if s in stages]
 
 
+def overlapping_stages(left, right):
+    """Mismo grupo y etapa; las muestras históricas se contrastan por normas."""
+    if left['crawl_run_id'] != right['crawl_run_id'] or left['config'].get('group') or right['config'].get('group'):
+        return []
+    a, b = left['config'], right['config']
+    group_a = a.get('group_pilot_id') or a.get('source_pilot_id') or left.get('id')
+    group_b = b.get('group_pilot_id') or b.get('source_pilot_id') or right.get('id')
+    if group_a != group_b:
+        # Sin linaje explícito, una muestra antigua puede solaparse con un grupo nuevo.
+        ids_a, ids_b = left.get('norm_ids'), right.get('norm_ids')
+        if ids_a and ids_b and not set(ids_a).intersection(ids_b):
+            return []
+    return [stage for stage in processing_stages(a) if stage in processing_stages(b)]
+
+
 def norm_groups(run_id, norm_ids):
     """Grupos estables de hasta 30 normas; prepararlos nunca ejecuta modelos."""
     ids = sorted(set(norm_ids))

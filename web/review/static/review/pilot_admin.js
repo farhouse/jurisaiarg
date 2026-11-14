@@ -39,7 +39,9 @@
       const response = await fetch(live.dataset.progressUrl, {headers: {'Accept': 'application/json'}, cache: 'no-store', signal: AbortSignal.timeout(10000)});
       if (!response.ok) throw new Error('progress');
       const data = await response.json();
+      const progressFocus = document.querySelector('#pilot-progress').contains(document.activeElement) ? document.activeElement.id : null;
       document.querySelector('#pilot-progress').innerHTML = data.progress_html;
+      if (progressFocus) (document.getElementById(progressFocus) || document.querySelector('#pilot-progress h2')).focus({preventScroll:true});
       if (lastSample !== data.sample_html) {
         const sample = document.querySelector('#pilot-sample');
         const expanded = [...sample.querySelectorAll('details[open]')].map(el => el.dataset.detailsKey);

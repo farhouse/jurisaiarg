@@ -22,3 +22,7 @@ ALTER TABLE crawl_jobs ADD COLUMN IF NOT EXISTS progress JSONB NOT NULL DEFAULT 
 
 ALTER TABLE crawl_jobs ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ;
 ALTER TABLE crawl_jobs ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ;
+ALTER TABLE crawl_jobs ADD COLUMN IF NOT EXISTS cancel_requested_at TIMESTAMPTZ;
+ALTER TABLE crawl_jobs DROP CONSTRAINT IF EXISTS crawl_jobs_status_check;
+ALTER TABLE crawl_jobs ADD CONSTRAINT crawl_jobs_status_check
+  CHECK (status IN ('queued','running','done','partial','failed','cancelled'));

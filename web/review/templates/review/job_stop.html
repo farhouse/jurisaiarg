@@ -1,0 +1,4 @@
+{% if job.active %}
+  {% if job.cancel_requested_at %}<div class="message" role="status"><strong>Deteniendo trabajo…</strong><p>Solicitud recibida el {{ job.cancel_requested_at|date:'d/m/Y H:i:s' }}. Esperando la confirmación del trabajador. Los resultados guardados se conservan.{% if not job.heartbeat_at %} Comprobá que el contenedor crawler esté encendido.{% endif %}</p></div>
+  {% else %}<form method="post" action="{% url 'review:crawl_stop' job.pk %}">{% csrf_token %}<button class="button" id="job-stop">Detener trabajo</button></form>{% endif %}
+{% elif job.status == 'cancelled' %}<p role="status"><strong>Trabajo detenido.</strong> Los resultados ya guardados se conservan.{% if job.mode == 'pilot' %} Una solicitud enviada al proveedor antes de la detención podría completar su procesamiento remoto.{% endif %}</p>{% endif %}

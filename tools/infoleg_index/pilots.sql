@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS analysis_pilot_items (
  fingerprint TEXT NOT NULL,
  UNIQUE(pilot_id,norm_id)
 );
+ALTER TABLE analysis_pilots ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+ALTER TABLE analysis_pilots ADD COLUMN IF NOT EXISTS archived_by TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS analysis_pilot_evaluations (
  id BIGSERIAL PRIMARY KEY,
  item_id BIGINT NOT NULL REFERENCES analysis_pilot_items(id),

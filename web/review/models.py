@@ -204,6 +204,7 @@ class CrawlJob(models.Model):
     progress = models.JSONField(default=dict)
     heartbeat_at = models.DateTimeField(null=True)
     last_activity_at = models.DateTimeField(null=True)
+    cancel_requested_at = models.DateTimeField(null=True)
     submission_id = models.UUIDField(unique=True)
     start_id = models.IntegerField()
     end_id = models.IntegerField()
@@ -211,12 +212,14 @@ class CrawlJob(models.Model):
     status = models.TextField(default="queued", choices=[
         ("queued", "En cola"), ("running", "En curso"), ("done", "Finalizado"),
         ("partial", "Finalizado con errores de descarga"), ("failed", "Interrumpido o fallido"),
+        ("cancelled", "Detenido"),
     ])
     stage = models.TextField(default="queued", choices=[
         ("queued", "Esperando al trabajador"), ("download", "Descargando índices"),
         ("parser", "Extrayendo relaciones"), ("classify", "Clasificando materias y pasajes"),
         ("embeddings", "Preparando búsqueda semántica"), ("review", "Preparando revisión"),
         ("finished", "Etapas solicitadas terminadas"),
+        ('cancelled', 'Trabajo detenido'),
         ('pilot_prepare', 'Preparando muestra congelada'), ('pilot_preflight', 'Comprobando endpoint gratuito'),
         ('pilot_laya', 'Evaluando Laya'), ('pilot_analyze', 'Analizando con OpenRouter'),
     ])
@@ -403,6 +406,8 @@ class AnalysisPilot(models.Model):
     phase = models.TextField(default='prepare')
     created_at = models.DateTimeField()
     reference_locked_at = models.DateTimeField(null=True)
+    archived_at = models.DateTimeField(null=True)
+    archived_by = models.TextField(default='')
 
     class Meta:
         managed = False
@@ -411,8 +416,13 @@ class AnalysisPilot(models.Model):
 
     @property
     def status_label(self):
+        if self.archived_at:
+            return 'Archivado'
+        if self.job.active and self.job.cancel_requested_at:
+            return 'Deteniendo…'
         return {'preparing':'Preparando muestra', 'reference':'Listo para analizar · referencia opcional',
-                'selection':'Listo para elegir normas', 'running':'Analizando', 'waiting':'Requiere atención', 'complete':'Análisis terminado'}.get(self.status, self.status)
+                'selection':'Listo para elegir normas', 'running':'Analizando', 'waiting':'Requiere atención',
+                'cancelled':'Detenido', 'complete':'Análisis terminado'}.get(self.status, self.status)
 
 
 class AnalysisPilotItem(models.Model):

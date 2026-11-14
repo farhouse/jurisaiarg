@@ -6,6 +6,7 @@
 <header class="work-heading"><div><h1>Índices {{ job.start_id }}–{{ job.end_id }}</h1><p>Solicitado por {{ job.requested_by }} el {{ job.created_at|date:"d/m/Y H:i" }}.</p></div><a class="button" href="{% url 'review:crawl_job' job.pk %}">Actualizar estado</a></header>
 <section class="panel">
   <h2>{{ job.get_status_display }}</h2><p>{{ job.get_mode_display }}</p>
+  {% include 'review/job_stop.html' %}
   <p>{% if job.status == 'failed' %}Última etapa: {% endif %}{{ job.get_stage_display }}.</p>
   {% if elapsed %}<p>Tiempo transcurrido: <strong>{{ elapsed }}</strong>.</p>{% endif %}
   {% if job.status == 'running' %}

@@ -62,6 +62,8 @@ def card_proposals(item, user_id=None):
 @transaction.atomic
 def publish(pilot_id, enabled, user_id=None):
     pilot = AnalysisPilot.objects.select_for_update().get(pk=pilot_id)
+    if enabled and pilot.archived_at:
+        raise ValueError('Restaurá el piloto antes de habilitar tarjetas.')
     if enabled:
         for item in pilot.items.filter(status='done'):
             proposals, _ = card_proposals(item,user_id)
@@ -209,7 +211,10 @@ def publication(request, pk):
     get_object_or_404(AnalysisPilot,pk=pk)
     if request.POST.get('action') not in ('publish','withdraw'):
         return HttpResponse('Acción inválida.',status=400)
-    publish(pk,request.POST['action']=='publish',request.user.pk)
+    try:
+        publish(pk,request.POST['action']=='publish',request.user.pk)
+    except ValueError as exc:
+        return HttpResponse(str(exc),status=409)
     messages.success(request,'Tarjetas actualizadas.' if request.POST['action']=='publish' else 'Muestra retirada. Las respuestas y el historial se conservan.')
     return redirect('review:pilot_detail',pk=pk)
 

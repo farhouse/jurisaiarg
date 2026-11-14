@@ -1,11 +1,12 @@
 <section class="panel">
-  <h2>{% if pilot.status == 'selection' %}Elegí las normas para tu próximo bloque{% elif pilot.status == 'reference' %}Muestra lista para analizar{% else %}{{ pilot.job.get_stage_display }}{% endif %}</h2>
-  <p>{{ pilot.job.progress.activity.message }}{% if pilot.job.progress.activity.document %} · {{ pilot.job.progress.activity.document }}{% endif %}</p>
+  <h2 tabindex="-1">{% if pilot.job.active and pilot.job.cancel_requested_at %}Detención en curso{% elif pilot.status == 'selection' %}Elegí las normas para tu próximo bloque{% elif pilot.status == 'reference' %}Muestra lista para analizar{% else %}{{ pilot.job.get_stage_display }}{% endif %}</h2>
+  {% include 'review/job_stop.html' with job=pilot.job %}
+  {% if pilot.job.progress.activity.message %}<p>{% if not pilot.job.active or pilot.job.cancel_requested_at %}Última actividad: {% endif %}{{ pilot.job.progress.activity.message }}{% if pilot.job.progress.activity.document %} · {{ pilot.job.progress.activity.document }}{% endif %}</p>{% endif %}
   {% if pilot.job.progress.activity.file %}<p>Archivo: {{ pilot.job.progress.activity.file }} · {{ pilot.job.progress.activity.files_done }} de {{ pilot.job.progress.activity.files_total }} archivos completados.</p>{% endif %}
   {% if pilot.job.active %}<p>Estado del trabajo: {{ pilot.job.get_status_display }}. El avance y las normas se actualizan automáticamente.</p>{% endif %}
   {% if heartbeat_age != None %}<p class="muted">Última señal del trabajador: hace {{ heartbeat_age }} s. Última actividad: hace {{ activity_age }} s.</p>{% if pilot.job.active and heartbeat_age >= 60 %}<p role="status">Hace más de un minuto que no recibimos señal. Comprobá el contenedor crawler.</p>{% endif %}{% endif %}
   {% if pilot.job.error %}<div class="review-errors" role="alert"><h3>El piloto necesita atención</h3><p>{{ pilot.job.error }}</p><p>Los resultados guardados se conservan. Corregí la configuración o esperá a que vuelva el cupo y retomá.</p></div>{% endif %}
-  {% if pilot.status == 'reference' %}
+  {% if pilot.status == 'reference' and not pilot.archived_at %}
     <p>Ya están guardadas las fuentes. Iniciá el análisis para recibir las propuestas de las etapas elegidas y revisarlas después.</p>
     <form method="post">{% csrf_token %}<input type="hidden" name="action" value="analyze_now"><button class="button primary">Analizar ahora</button></form>
     <details><summary>Preparar una referencia antes de analizar · opcional</summary>
@@ -13,8 +14,8 @@
       <ul>{% for item in items %}<li><a href="{% url 'review:pilot_item' pilot.pk item.pk %}?reference=1">{{ item.snapshot.identity.type }} {{ item.snapshot.identity.number }}</a> · {{ item.reference_done }}/5 bloques</li>{% endfor %}</ul>
       <form method="post">{% csrf_token %}<input type="hidden" name="action" value="analyze"><button class="button">Congelar referencia e iniciar análisis</button></form>
     </details>
-  {% elif pilot.status == 'waiting' %}<form method="post">{% csrf_token %}<input type="hidden" name="action" value="resume"><button class="button primary">Retomar piloto</button></form>{% endif %}
-  {% if pilot.job.active %}<p>El análisis continúa en segundo plano. Cuando haya fichas disponibles, podés abrirlas desde el listado.</p>{% endif %}
+  {% elif not pilot.archived_at %}{% if pilot.status == 'waiting' or pilot.status == 'cancelled' %}<form method="post">{% csrf_token %}<input type="hidden" name="action" value="resume"><button class="button primary">Retomar piloto</button></form>{% endif %}{% endif %}
+  {% if pilot.job.active and not pilot.job.cancel_requested_at %}<p>El análisis continúa en segundo plano. Cuando haya fichas disponibles, podés abrirlas desde el listado.</p>{% endif %}
   {% if pilot.config.group %}<p>Este grupo conserva las fuentes y las propuestas de reglas. Prepararlo no ejecutó Laya ni la LLM. Marcá las normas en la tabla y elegí las etapas debajo.</p>{% else %}
   <p>Etapas elegidas: <strong>{{ processing_label }}</strong>. Laya reutiliza resultados compatibles; si no está elegido, no se ejecuta.</p>
   {% if 'llm' in selected_stages %}<p class="muted pilot-model">Modelo de esta ejecución: {{ pilot.model }}. Solo endpoints gratuitos compatibles; no hay cambio automático a pago.</p>

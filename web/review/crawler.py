@@ -1,7 +1,9 @@
 import uuid
 
 from django import forms
+from django.contrib import messages
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_GET
@@ -99,3 +101,28 @@ def job_detail(request, pk):
         "progress_stale": activity_age is not None and activity_age >= 300,
 
     })
+
+
+@staff_required
+@require_http_methods(['POST'])
+def stop(request, pk):
+    original = get_object_or_404(CrawlJob,pk=pk)
+    with transaction.atomic():
+        if original.crawl_run_id:
+            CrawlRun.objects.select_for_update().get(pk=original.crawl_run_id)
+        job = get_object_or_404(CrawlJob.objects.select_for_update(),pk=pk)
+        if job.active and not job.cancel_requested_at:
+            job.cancel_requested_at=timezone.now()
+            fields=['cancel_requested_at']
+            if job.status=='queued':
+                job.status,job.stage,job.finished_at='cancelled','cancelled',timezone.now()
+                fields+=['status','stage','finished_at']
+                AnalysisPilot.objects.filter(job=job).update(status='cancelled')
+            job.save(update_fields=fields)
+        if job.status=='cancelled':
+            messages.success(request,'Trabajo detenido. Los resultados guardados se conservan.')
+        elif job.active:
+            messages.success(request,'Se pidió detener el trabajo. Esperá el estado «Detenido» antes de archivarlo o iniciar otro de la misma etapa.')
+        else:
+            messages.info(request,'El trabajo ya terminó; no hay nada que detener.')
+    return redirect('review:crawl_job',pk=pk)

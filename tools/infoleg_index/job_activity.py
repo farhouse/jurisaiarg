@@ -5,6 +5,23 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 
+class JobCancelled(Exception):
+    """Detención solicitada por el administrador, distinta de un error."""
+
+
+def lock_job(con, job_id):
+    # Mismo orden que Gestión: lote, piloto y trabajo. Evita invertir locks al finalizar/detener.
+    con.execute('SELECT id FROM crawl_runs WHERE id=(SELECT crawl_run_id FROM crawl_jobs WHERE id=%s) FOR UPDATE',(job_id,)).fetchall()
+    con.execute('SELECT id FROM analysis_pilots WHERE job_id=%s FOR UPDATE',(job_id,)).fetchall()
+    return con.execute('SELECT cancel_requested_at FROM crawl_jobs WHERE id=%s FOR UPDATE',(job_id,)).fetchone()
+
+
+def check_cancelled(con, job_id, lock=False):
+    row = lock_job(con,job_id) if lock else con.execute('SELECT cancel_requested_at FROM crawl_jobs WHERE id=%s',(job_id,)).fetchone()
+    if row and row[0]:
+        raise JobCancelled()
+
+
 class JobActivity:
     def __init__(self, dsn, job_id, heartbeat=False):
         self.dsn, self.job_id, self.heartbeat = dsn, job_id, heartbeat
@@ -19,6 +36,7 @@ class JobActivity:
         return self
 
     def __call__(self, message, **details):
+        check_cancelled(self.con,self.job_id)
         self.con.execute('''UPDATE crawl_jobs SET last_activity_at=clock_timestamp(),
             progress=progress || %s WHERE id=%s AND status='running' ''',
             (Jsonb({'activity': {'message': message, **details}}), self.job_id))

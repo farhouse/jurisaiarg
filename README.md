@@ -34,6 +34,13 @@ El administrador elige el modelo gratuito y los límites de salida y razonamient
 en **Gestión → Pilotos**; también puede crear otra ejecución de una muestra ya
 preparada con otro modelo o presupuesto de tokens. Las casillas **Laya** y **LLM** permiten ejecutar una sola etapa o ambas; repetir una muestra ofrece solo LLM por defecto y conserva Laya guardado. El detalle actualiza los estados de cada norma en segundo plano, sin recargar la página.
 
+Desde el listado o detalle se pueden **detener** trabajos y **archivar** pilotos
+inactivos. El archivo es recuperable y conserva resultados y respuestas; retira sus
+tarjetas. Una detención en curso espera la confirmación del trabajador. No se
+admiten dos trabajos activos de la misma etapa sobre un grupo, incluso con
+solicitudes simultáneas. Ver los detalles en la guía del piloto. Esta actualización
+requiere recrear `init`, `crawler` y `web` con la misma versión para aplicar el esquema.
+
 **Validar** ofrece tarjetas de temas y resúmenes. El administrador habilita las
 fichas terminadas desde un piloto; las respuestas se registran separadas de los
 datos oficiales y de los votos históricos. Gestión incluye las respuestas por ley

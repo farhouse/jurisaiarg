@@ -13,7 +13,7 @@ from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 import os
 
-from job_activity import JobActivity
+from job_activity import JobActivity, JobCancelled, check_cancelled, lock_job
 from crawl_infoleg_pg import crawl_ids
 from extract_legal_changes import main as parse_changes
 from prepare_review import main as prepare_review
@@ -55,13 +55,21 @@ def initialize(dsn):
 
 def recover_interrupted(con):
     # Solo después de obtener el lock: ningún otro worker está ejecutando estos trabajos.
+    con.execute("""SELECT id FROM crawl_runs WHERE id IN (SELECT crawl_run_id FROM crawl_jobs
+        WHERE status='running' OR cancel_requested_at IS NOT NULL) ORDER BY id FOR UPDATE""").fetchall()
     con.execute("""UPDATE analysis_pilots SET status='waiting' WHERE job_id IN
         (SELECT id FROM crawl_jobs WHERE status='running' AND mode='pilot')""")
-    con.execute("""UPDATE crawl_runs SET status='error', finished_at=now()
+    con.execute("""UPDATE crawl_runs SET status=CASE WHEN EXISTS(
+            SELECT 1 FROM crawl_jobs j WHERE j.crawl_run_id=crawl_runs.id
+              AND j.status='running' AND j.cancel_requested_at IS NOT NULL) THEN 'partial' ELSE 'error' END,
+        finished_at=now()
         WHERE status='running' AND id IN (SELECT crawl_run_id FROM crawl_jobs WHERE status='running' AND mode<>'pilot')""")
     con.execute("""UPDATE crawl_jobs SET status='failed', finished_at=now(),
         error='El trabajador se interrumpió. Podés volver a solicitar el rango; los datos guardados se conservan.'
         WHERE status='running'""")
+    con.execute("""UPDATE crawl_jobs SET status='cancelled',stage='cancelled',finished_at=now(),error=''
+        WHERE cancel_requested_at IS NOT NULL AND status IN ('queued','failed')""")
+    con.execute("UPDATE analysis_pilots SET status='cancelled' WHERE job_id IN (SELECT id FROM crawl_jobs WHERE status='cancelled')")
     con.commit()
 
 
@@ -111,11 +119,18 @@ def process_next(con, dsn):
             report('Preparando controles para revisión')
             prepare_review(['--dsn', dsn, '--run-id', str(run_id), '--indices-only','--refresh-documents'], report=report)
             status = con.execute("SELECT status FROM crawl_runs WHERE id=%s", (run_id,)).fetchone()[0]
+            check_cancelled(con,job['id'],lock=True)
             con.execute("UPDATE crawl_jobs SET status=%s, stage='finished', finished_at=now() WHERE id=%s",
                         ('done' if status == 'ok' else 'partial', job['id']))
             if job['mode']=='download':
                 create_groups(con,run_id,job['requested_by'],job['start_id'])
             con.commit()
+    except JobCancelled:
+        con.rollback()
+        finish_cancelled(con,job['id'])
+        if job['mode'] != 'process':
+            con.execute("UPDATE crawl_runs SET status='partial',finished_at=now() WHERE id=%s AND status='running'",(run_id,))
+        con.commit()
     except BaseException as exc:
         con.rollback()
         # No guardar DSN, HTML remoto ni trazas que puedan incluir credenciales.
@@ -148,6 +163,10 @@ def process_pilot(con, dsn, job):
         heartbeat_at=now(),last_activity_at=now(),error='' WHERE id=%s""", (job['id'],))
     con.commit()
     try:
+        check_cancelled(con,job['id'])
+        # Evita ejecutar duplicados de la cola anterior a este control; conserva sus resultados.
+        reject_duplicate_pilots(con,pilot_id,job['id'])
+        con.commit()
         with JobActivity(dsn, job['id'], heartbeat=True) as report:
             selected = processing_stages(config)
             analysis = (['preflight'] if 'llm' in selected else []) + (['laya'] if 'laya' in selected else []) + (['analyze'] if 'llm' in selected else [])
@@ -162,8 +181,7 @@ def process_pilot(con, dsn, job):
                 child = subprocess.Popen([sys.executable, str(Path(__file__).with_name('pilot.py')),
                                           stage, str(pilot_id), str(job['id'])], env={**os.environ,'PIPELINE_DSN':dsn})
                 try:
-                    if child.wait() != 0:
-                        raise RuntimeError('Etapa del piloto interrumpida')
+                    wait_child(child,con,job['id'])
                 finally:
                     if child.poll() is None:
                         child.terminate()
@@ -174,12 +192,16 @@ def process_pilot(con, dsn, job):
                             child.wait()
                 if stage == 'prepare' and con.execute('SELECT phase FROM analysis_pilots WHERE id=%s', (pilot_id,)).fetchone()[0] == 'analyze':
                     stages.extend(analysis)
+        check_cancelled(con,job['id'],lock=True)
         if 'llm' not in selected and con.execute('SELECT phase FROM analysis_pilots WHERE id=%s',(pilot_id,)).fetchone()[0]=='analyze':
             con.execute("UPDATE analysis_pilots SET status='complete' WHERE id=%s",(pilot_id,))
         if config.get('group'):
             con.execute("UPDATE analysis_pilots SET status='selection' WHERE id=%s",(pilot_id,))
         con.execute("UPDATE crawl_jobs SET progress=progress - 'pilot_current' WHERE id=%s",(job['id'],))
         con.execute("UPDATE crawl_jobs SET status='done',stage='finished',finished_at=now() WHERE id=%s", (job['id'],))
+    except JobCancelled:
+        con.rollback()
+        finish_cancelled(con,job['id'])
     except BaseException as exc:
         con.rollback()
         con.execute("""UPDATE crawl_jobs SET status='failed',finished_at=now(),
@@ -193,13 +215,53 @@ def process_pilot(con, dsn, job):
     return True
 
 
+def finish_cancelled(con, job_id):
+    lock_job(con,job_id)
+    con.execute("""UPDATE crawl_jobs SET status='cancelled',stage='cancelled',finished_at=now(),error='',
+        progress=progress - 'pilot_current' WHERE id=%s""",(job_id,))
+    con.execute("UPDATE analysis_pilots SET status='cancelled' WHERE job_id=%s",(job_id,))
+
+
+def reject_duplicate_pilots(con, pilot_id, job_id):
+    from pilot_contract import overlapping_stages
+    con.execute('SELECT id FROM crawl_runs WHERE id=(SELECT crawl_run_id FROM analysis_pilots WHERE id=%s) FOR UPDATE',(pilot_id,)).fetchall()
+    with con.cursor(row_factory=dict_row) as cur:
+        cur.execute("""SELECT p.id,p.config,p.crawl_run_id,p.job_id,
+            ARRAY(SELECT norm_id FROM analysis_pilot_items WHERE pilot_id=p.id) AS norm_ids
+            FROM analysis_pilots p JOIN crawl_jobs j ON j.id=p.job_id
+            WHERE p.crawl_run_id=(SELECT crawl_run_id FROM analysis_pilots WHERE id=%s)
+              AND j.status IN ('queued','running') ORDER BY j.id""",(pilot_id,))
+        pilots=cur.fetchall()
+    current=next(p for p in pilots if p['id']==pilot_id)
+    for other in pilots:
+        if other['job_id']>job_id and overlapping_stages(current,other):
+            con.execute("""UPDATE crawl_jobs SET status='failed',finished_at=now(),error=%s
+                WHERE id=%s AND status='queued'""",
+                (f'No se inició un duplicado del análisis {pilot_id}. Revisá el trabajo existente antes de retomarlo.',other['job_id']))
+            con.execute("UPDATE analysis_pilots SET status='waiting' WHERE id=%s AND job_id IN (SELECT id FROM crawl_jobs WHERE status='failed')",(other['id'],))
+
+
+def wait_child(child, con, job_id):
+    while True:
+        check_cancelled(con,job_id)
+        con.commit()
+        try:
+            code=child.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            continue
+        check_cancelled(con,job_id)
+        if code!=0:
+            raise RuntimeError('Etapa del trabajo interrumpida')
+        return
+
+
 def run_stage(stage, job_id, run_id, dsn):
     env = {**os.environ, 'PIPELINE_DSN': dsn}
     child = subprocess.Popen([sys.executable, str(Path(__file__).with_name('enrich.py')),
                               stage, str(run_id), str(job_id)], env=env)
     try:
-        if child.wait() != 0:
-            raise RuntimeError(f'Falló {stage}')
+        with psycopg.connect(dsn) as con:
+            wait_child(child,con,job_id)
     finally:
         if child.poll() is None:
             child.terminate()

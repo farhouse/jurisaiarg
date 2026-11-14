@@ -269,7 +269,7 @@ class PilotsTest(TransactionTestCase):
         self.assertEqual(copied.model,original.model);self.assertEqual(copied.crawl_run_id,run.pk)
         self.assertEqual(copied.phase,'analyze');self.assertEqual(copied.job.status,'queued')
         self.assertEqual(copied.config,{'contract':VERSION,'prompt':PROMPT_VERSION,'reference_required':False,
-            'source_pilot_id':original.pk,'source_item_ids':[item.pk],'stages':['llm'],'request_settings':request_budget(32768,4096)})
+            'source_pilot_id':original.pk,'group_pilot_id':original.pk,'source_item_ids':[item.pk],'stages':['llm'],'request_settings':request_budget(32768,4096)})
         self.assertEqual(copied.reference_locked_at,now);self.assertEqual(copied.coverage,{**original.coverage,'with_references':0,'updated':0})
         fresh=copied.items.get()
         self.assertEqual(fresh.snapshot,snapshot);self.assertEqual(fresh.reference,result)
@@ -339,3 +339,93 @@ class PilotsTest(TransactionTestCase):
         self.assertEqual(repeated.status_code,302)
         latest=AnalysisPilot.objects.order_by('-id').first().items.get()
         self.assertEqual(latest.laya,fresh.laya);self.assertEqual(latest.metadata['laya_source_item_id'],fresh.pk)
+
+    def ready_group(self):
+        admin=User.objects.create_user('lifecycle-admin',is_staff=True);self.client.force_login(admin)
+        now=timezone.now()
+        run=CrawlRun.objects.create(requested_ids=[1,2],started_at=now,finished_at=now,status='ok',processed_count=2)
+        job=CrawlJob.objects.create(submission_id=uuid.uuid4(),start_id=1,end_id=2,mode='pilot',status='done',crawl_run=run,requested_by=admin.username,created_at=now)
+        group=AnalysisPilot.objects.create(job=job,crawl_run=run,model=DEFAULT_MODEL,status='selection',phase='select',config={'group':True},created_at=now)
+        for i in (1,2):
+            norm=Norm.objects.create(infoleg_id=i,norm_type='Ley',number=str(i),canonical_title='Norma de prueba',general_status='desconocida',index_status='completa',article_count=1)
+            AnalysisPilotItem.objects.create(pilot=group,norm=norm,snapshot={'identity':{'type':'Ley','number':str(i)},'source':{},'units':[]},reference=empty_result(),split='development',fingerprint=str(i))
+        return admin,group,list(group.items.all())
+
+    def test_stage_exclusion_stop_resume_and_archival_preserve_history(self):
+        admin,group,items=self.ready_group()
+        url=f'/gestion/pilotos/{group.pk}/'
+        payload={'action':'compare_model','submission_id':uuid.uuid4(),'stages':['laya'],'items':[items[0].pk]}
+        first=self.client.post(url,payload);self.assertEqual(first.status_code,302)
+        running=AnalysisPilot.objects.exclude(pk=group.pk).get()
+        # Mismo grupo: ni otra selección ni otro modelo permiten duplicar Laya en cola.
+        duplicate=self.client.post(url,{**payload,'submission_id':uuid.uuid4(),'items':[items[1].pk]})
+        self.assertContains(duplicate,'Abrir análisis',status_code=409)
+        self.assertEqual(AnalysisPilot.objects.count(),2)
+        self.assertEqual(self.client.post(url,payload).url,first.url)  # Reintento idempotente.
+        # Una etapa diferente sí puede pedirse por separado.
+        llm=self.client.post(url,{**payload,**LIMITS,'stages':['llm'],'model':DEFAULT_MODEL,'submission_id':uuid.uuid4()})
+        self.assertEqual(llm.status_code,302)
+        self.assertEqual(self.client.post(url,{**payload,**LIMITS,'model':DEFAULT_MODEL,'submission_id':uuid.uuid4()}).status_code,409)
+        archive=f'/gestion/pilotos/{group.pk}/archivo/'
+        self.client.post(archive,{'action':'archive'});group.refresh_from_db();self.assertIsNone(group.archived_at)
+        stop=f'/gestion/descargas/{running.job_id}/detener/'
+        protected=Client(enforce_csrf_checks=True);protected.force_login(admin)
+        self.assertEqual(protected.post(stop).status_code,403)
+        self.assertEqual(protected.post(archive,{'action':'archive'}).status_code,403)
+        self.assertEqual(self.client.get(stop).status_code,405)
+        self.client.post(stop);self.client.post(stop)
+        running.refresh_from_db();self.assertEqual(running.status,'cancelled');self.assertEqual(running.job.status,'cancelled')
+        self.assertEqual(self.client.post(first.url,{'action':'resume'}).status_code,302)
+        running.refresh_from_db();self.assertIsNone(running.job.cancel_requested_at)
+        running.job.status='running';running.job.save()
+        self.client.post(stop);running.job.refresh_from_db()
+        self.assertEqual(running.job.status,'running');self.assertIsNotNone(running.job.cancel_requested_at)
+        self.assertContains(self.client.get(first.url),'Deteniendo trabajo')
+        self.assertEqual(self.client.post(url,{**payload,'submission_id':uuid.uuid4()}).status_code,409)
+        # Hasta la confirmación del worker sigue reservado y no se puede archivar.
+        own_archive=f'/gestion/pilotos/{running.pk}/archivo/'
+        self.client.post(own_archive,{'action':'archive'});running.refresh_from_db();self.assertIsNone(running.archived_at)
+        running.job.status='cancelled';running.job.save();running.status='cancelled';running.save()
+        item=running.items.get()
+        evaluation=AnalysisPilotEvaluation.objects.create(item=item,phase='reference',block='summary',user_id=admin.pk,username=admin.username,decision='confirmed',value={},revision=1,created_at=timezone.now())
+        card=ReviewCard.objects.create(item=item,kind='topic',fingerprint='history',snapshot=item.snapshot,proposal={},created_at=timezone.now())
+        vote=CardResponse.objects.create(card=card,user_id=admin.pk,username=admin.username,action='answer',decision='skip',request_id=uuid.uuid4(),created_at=timezone.now())
+        original=list(running.items.values())
+        self.client.post(own_archive,{'action':'archive'});self.client.post(own_archive,{'action':'archive'})
+        running.refresh_from_db();card.refresh_from_db()
+        self.assertIsNotNone(running.archived_at);self.assertFalse(card.active)
+        self.assertNotContains(self.client.get('/gestion/pilotos/'),first.url)
+        self.assertContains(self.client.get('/gestion/pilotos/?archivados=1'),first.url)
+        self.assertEqual(list(running.items.values()),original)
+        self.assertTrue(AnalysisPilotEvaluation.objects.filter(pk=evaluation.pk).exists())
+        self.assertTrue(CardResponse.objects.filter(pk=vote.pk).exists())
+        self.assertEqual(self.client.post(first.url,{'action':'resume'}).status_code,400)
+        self.assertEqual(self.client.post(first.url+'tarjetas/',{'action':'publish'}).status_code,409)
+        self.assertEqual(self.client.get(first.url+'exportar/').status_code,200)
+        self.client.post(own_archive,{'action':'restore'});running.refresh_from_db();card.refresh_from_db()
+        self.assertIsNone(running.archived_at);self.assertFalse(card.active)
+        validator=User.objects.create_user('lifecycle-validator');self.client.force_login(validator)
+        self.assertEqual(self.client.post(stop).status_code,403)
+        self.assertEqual(self.client.post(own_archive,{'action':'archive'}).status_code,403)
+
+    def test_concurrent_submissions_create_only_one_analysis_and_block_resume(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from django.db import close_old_connections
+        admin,group,items=self.ready_group()
+        url=f'/gestion/pilotos/{group.pk}/'
+        clients=[Client(),Client()]
+        for client in clients:client.force_login(admin)
+        def submit(client):
+            close_old_connections()
+            try:
+                return client.post(url,{'action':'compare_model','stages':['laya'],'items':[items[0].pk],'submission_id':uuid.uuid4()}).status_code
+            finally:close_old_connections()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            self.assertEqual(sorted(pool.map(submit,clients)),[302,409])
+        active=AnalysisPilot.objects.exclude(pk=group.pk).get()
+        # Reanudar un análisis viejo tampoco elude la exclusión.
+        old_job=CrawlJob.objects.create(submission_id=uuid.uuid4(),start_id=1,end_id=2,mode='pilot',status='failed',crawl_run=group.crawl_run,requested_by='test',created_at=timezone.now())
+        old=AnalysisPilot.objects.create(job=old_job,crawl_run=group.crawl_run,model=DEFAULT_MODEL,status='waiting',phase='analyze',config={'stages':['laya'],'group_pilot_id':group.pk},created_at=timezone.now())
+        response=self.client.post(f'/gestion/pilotos/{old.pk}/',{'action':'resume'})
+        self.assertContains(response,f'Abrir análisis {active.pk}',status_code=409)
+        old_job.refresh_from_db();self.assertEqual(old_job.status,'failed')

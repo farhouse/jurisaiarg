@@ -4,7 +4,8 @@
 {% block content %}
 <a class="back pilot-nav" href="{% url 'review:pilot_detail' pilot.pk %}">Volver al piloto {{ pilot.pk }}</a>
 <header class="work-heading"><div><h1>{{ item.snapshot.identity.type }} {{ item.snapshot.identity.number }}</h1><p>{{ item.snapshot.identity.title }} · InfoLEG {{ item.snapshot.identity.infoleg_id }} · {{ item.snapshot.source.version }}</p></div><span>{{ position }} de {{ total }}</span></header>
-{% if blocks %}
+{% if pilot.archived_at %}<div class="message"><strong>Piloto archivado · solo lectura.</strong> Las propuestas y el historial se conservan. <a href="{% url 'review:pilot_detail' pilot.pk %}">Restaurar desde el piloto</a>.</div>
+{% elif blocks %}
 <div class="pilot-toolbar">
   <div><strong>{% if phase == 'reference' %}Referencia manual · evaluación avanzada{% else %}Revisar ficha generada{% endif %}</strong><span id="pilot-save-state" role="status">Los cambios se guardan automáticamente.</span></div>
   <button type="button" class="button primary" id="pilot-confirm-all" data-next-url="{% if next_item %}{% url 'review:pilot_item' pilot.pk next_item %}{{ reference_query }}{% else %}{% url 'review:pilot_detail' pilot.pk %}{% endif %}">{% if phase == 'reference' %}Confirmar referencia y continuar{% else %}Confirmar ficha y continuar{% endif %}</button>
@@ -33,7 +34,7 @@
   {% else %}{% for fact in block.facts %}<div class="pilot-fact"><p>{{ fact.label }}{% if fact.detail %}<br><span class="muted">{{ fact.detail }}</span>{% endif %}</p>{% if fact.resolution %}<p class="muted">{{ fact.resolution }}</p>{% endif %}</div>{% empty %}<p>No hay propuestas en este bloque. Comprobá si es correcto que esté vacío.</p>{% endfor %}{% endif %}
   {% if block.evidence %}<details class="pilot-proof"><summary>Ver evidencia de {{ block.label|lower }}</summary>{% for evidence in block.evidence %}{% if block.key == 'concepts' or block.key == 'matters' %}<p>{{ evidence.labels|join:', ' }}</p>{% endif %}<blockquote>{{ evidence.quote }}</blockquote><a class="pilot-evidence" href="#source-{{ evidence.unit_id }}">Ubicar en la fuente</a>{% endfor %}</details>{% endif %}
   {% if phase == 'result' and pilot.reference_locked_at %}<details class="pilot-baseline"><summary>Comparar con la referencia congelada</summary>{% for fact in block.baseline %}<p><strong>{{ fact.label }}</strong> {{ fact.detail }}</p>{% empty %}<p>La referencia no contiene entradas para este bloque.</p>{% endfor %}</details>{% endif %}
-  <form method="post" action="{% url 'review:pilot_evaluate' pilot.pk item.pk %}" class="pilot-evaluation" data-block="{{ block.key }}">
+  {% if not pilot.archived_at %}<form method="post" action="{% url 'review:pilot_evaluate' pilot.pk item.pk %}" class="pilot-evaluation" data-block="{{ block.key }}">
     {% csrf_token %}<input type="hidden" name="phase" value="{{ phase }}"><input type="hidden" name="block" value="{{ block.key }}">{{ block.form.revision }}{{ block.form.elapsed_ms }}
     <span class="pilot-block-state" role="status">{% if block.previous %}{% if block.previous.decision == 'confirmed' %}Confirmado{% elif block.previous.decision == 'corrected' %}Corregido{% elif block.previous.decision == 'legal' %}Requiere criterio jurídico{% else %}Sin decisión{% endif %} · {{ block.previous.username }}{% endif %}</span>
     <details class="pilot-review-controls" {% if block.previous.decision == 'corrected' or block.previous.decision == 'legal' or block.form.errors %}open{% endif %}><summary>Corregir o señalar un problema</summary>
@@ -50,13 +51,13 @@
       </details>
       <div class="pilot-field">{{ block.form.notes.label_tag }}{{ block.form.notes }}</div><button class="button" type="submit">Guardar cambios de {{ block.label|lower }}</button>
     </details>
-  </form>
+  </form>{% endif %}
 {% if block.key == 'articles' %}</details>{% else %}</section>{% endif %}
 {% endfor %}
 {% if item.result.doubts %}<section class="pilot-block"><h2>Dudas señaladas por la LLM</h2><ul>{% for doubt in item.result.doubts %}<li><strong>{{ doubt.field }}</strong>: {{ doubt.reason }}</li>{% endfor %}</ul></section>{% endif %}
 {% if item.result.forum %}<details class="pilot-block"><summary>Fuero mencionado explícitamente</summary><p>{{ item.result.forum.text }}</p>{% for evidence in item.result.forum.evidence %}<blockquote>{{ evidence.quote }}</blockquote><a class="pilot-evidence" href="#source-{{ evidence.unit_id }}">Ubicar evidencia</a>{% endfor %}<p class="muted">Propuesta experimental que requiere criterio jurídico; no asigna competencia judicial en la base.</p></details>{% endif %}
 {% if blocks %}<details class="pilot-block"><summary>Consultas cotidianas de prueba · opcional</summary><p>Qué buscaría una persona para encontrar esta norma. El buscador actual sigue siendo la referencia inicial.</p>
-{% if phase == 'reference' %}<form class="pilot-evaluation" data-block="search_queries" method="post" action="{% url 'review:pilot_evaluate' pilot.pk item.pk %}">{% csrf_token %}<input type="hidden" name="block" value="search_queries"><input type="hidden" name="phase" value="reference"><input type="hidden" name="revision" value="{{ queries_revision }}"><div class="pilot-form-errors" role="alert" tabindex="-1" hidden></div><label for="pilot-queries">Una consulta por línea</label><textarea id="pilot-queries" name="text" rows="4" maxlength="5000">{{ queries_text }}</textarea><button type="submit" class="button">Guardar consultas</button><span class="pilot-block-state" role="status"></span></form>
+{% if phase == 'reference' and not pilot.archived_at %}<form class="pilot-evaluation" data-block="search_queries" method="post" action="{% url 'review:pilot_evaluate' pilot.pk item.pk %}">{% csrf_token %}<input type="hidden" name="block" value="search_queries"><input type="hidden" name="phase" value="reference"><input type="hidden" name="revision" value="{{ queries_revision }}"><div class="pilot-form-errors" role="alert" tabindex="-1" hidden></div><label for="pilot-queries">Una consulta por línea</label><textarea id="pilot-queries" name="text" rows="4" maxlength="5000">{{ queries_text }}</textarea><button type="submit" class="button">Guardar consultas</button><span class="pilot-block-state" role="status"></span></form>
 {% else %}<ul>{% for query in item.metadata.search_queries %}<li><a href="{% url 'review:norm_search' %}?mode=semantic&amp;q={{ query|urlencode }}" target="_blank" rel="noopener">{{ query }}</a></li>{% empty %}<li>No se fijaron consultas de prueba para esta norma.</li>{% endfor %}</ul>{% endif %}
 </details>{% endif %}
 {% if item.result %}<details class="pilot-block"><summary>Resultado de Laya y datos del procesamiento</summary>{% if item.laya.error %}<p>{{ item.laya.error }}</p>{% endif %}
@@ -67,5 +68,5 @@
 {% if history %}<details class="pilot-block"><summary>Historial de revisiones</summary>{% for event in history %}<p>{{ event.created_at|date:'d/m/Y H:i' }} · {{ event.username }} · {{ event.phase }} / {{ event.block }} · {{ event.decision }} · revisión {{ event.revision }}{% if event.notes %}<br>{{ event.notes }}{% endif %}</p>{% endfor %}</details>{% endif %}
 </section></div>
 <nav class="pilot-pagination" aria-label="Normas del piloto">{% if previous_item %}<a class="button pilot-nav" href="{% url 'review:pilot_item' pilot.pk previous_item %}{{ reference_query }}">Norma anterior</a>{% endif %}<a class="button pilot-nav" href="{% url 'review:pilot_detail' pilot.pk %}">Ver avance</a>{% if next_item %}<a class="button pilot-nav" href="{% url 'review:pilot_item' pilot.pk next_item %}{{ reference_query }}">Siguiente norma</a>{% endif %}</nav>
-{% if blocks %}<script src="{% static 'review/pilots.js' %}" defer></script>{% endif %}
+{% if blocks and not pilot.archived_at %}<script src="{% static 'review/pilots.js' %}" defer></script>{% endif %}
 {% endblock %}
