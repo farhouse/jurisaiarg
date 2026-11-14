@@ -19,7 +19,8 @@ from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_http_methods, require_GET
 
 from .models import AnalysisPilot, AnalysisPilotItem, AnalysisPilotEvaluation, CrawlJob, CrawlRun, Norm, ReviewCard
-from .pilot_contract import BLOCKS, DEFAULT_MODEL, VERSION, PROMPT_VERSION, analysis_resources
+from .pilot_contract import (BLOCKS, DEFAULT_MODEL, VERSION, PROMPT_VERSION, analysis_resources,
+    request_budget, DEFAULT_MAX_TOKENS, DEFAULT_REASONING_TOKENS)
 from .pilot_forms import BlockForm
 from .workflow import staff_required
 
@@ -59,12 +60,27 @@ def model_choices():
 class ModelForm(forms.Form):
     model = forms.ChoiceField(label='Modelo de OpenRouter',choices=[],
         help_text='Modelos gratuitos que anuncian salida estructurada. El trabajador comprueba la disponibilidad antes de analizar.')
+    max_tokens = forms.IntegerField(label='Límite total de salida (tokens)',min_value=2048,max_value=131072,
+        help_text='Incluye el razonamiento y la ficha JSON. No es el tamaño de la ley.')
+    reasoning_tokens = forms.IntegerField(label='Límite de razonamiento (tokens)',min_value=1024,max_value=130048,
+        help_text='Forma parte del límite total. Solo se envía si el modelo permite limitarlo.')
     submission_id = forms.UUIDField(widget=forms.HiddenInput)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         choices,self.catalog_warning = model_choices()
         self.fields['model'].choices = [('', 'Elegí un modelo')]+choices
+        self.fields['max_tokens'].initial = os.environ.get('JURISAI_PILOT_MAX_TOKENS',DEFAULT_MAX_TOKENS)
+        self.fields['reasoning_tokens'].initial = os.environ.get('JURISAI_PILOT_REASONING_TOKENS',DEFAULT_REASONING_TOKENS)
+
+    def clean(self):
+        data = super().clean()
+        if 'max_tokens' in data and 'reasoning_tokens' in data:
+            try:
+                data['request_settings'] = request_budget(data['max_tokens'],data['reasoning_tokens'])
+            except ValueError as exc:
+                self.add_error('reasoning_tokens',str(exc))
+        return data
 
 
 class PrepareForm(ModelForm):
@@ -101,9 +117,11 @@ def index(request):
             else:
                 pilot, _ = AnalysisPilot.objects.get_or_create(job=job, defaults={'crawl_run':run,
                     'model':form.cleaned_data['model'],'created_at':timezone.now(),
-                    'config':{'contract':VERSION,'prompt':PROMPT_VERSION,'reference_required':form.cleaned_data['reference_required']}})
-                if pilot.model!=form.cleaned_data['model'] or pilot.crawl_run_id!=run.pk or pilot.config.get('source_pilot_id'):
-                    form.add_error(None,'Esta solicitud ya creó otro piloto. Recargá antes de cambiar el modelo o lote.')
+                    'config':{'contract':VERSION,'prompt':PROMPT_VERSION,'reference_required':form.cleaned_data['reference_required'],
+                        'request_settings':form.cleaned_data['request_settings']}})
+                if (pilot.model!=form.cleaned_data['model'] or pilot.crawl_run_id!=run.pk or pilot.config.get('source_pilot_id')
+                        or pilot.config.get('request_settings')!=form.cleaned_data['request_settings']):
+                    form.add_error(None,'Esta solicitud ya creó otro piloto. Recargá antes de cambiar el modelo, los límites o el lote.')
                 else:
                     return redirect('review:pilot_detail', pk=pilot.pk)
     return render(request,'review/pilots/index.html',{'form':form,'pilots':AnalysisPilot.objects.select_related('job','crawl_run')[:50]},
@@ -195,31 +213,29 @@ def detail(request, pk):
             elif request.POST.get('action')=='compare_model' and pilot.items.exists():
                 model_form = ModelForm(request.POST)
                 if model_form.is_valid():
-                    if model_form.cleaned_data['model']==pilot.model:
-                        model_form.add_error('model','Elegí un modelo diferente al de este piloto.')
+                    new_job,_ = CrawlJob.objects.get_or_create(submission_id=model_form.cleaned_data['submission_id'],defaults={
+                        'mode':'pilot','start_id':job.start_id,'end_id':job.end_id,'crawl_run':pilot.crawl_run,
+                        'requested_by':request.user.username,'created_at':timezone.now()})
+                    if new_job.mode!='pilot':
+                        error = 'Esta solicitud pertenece a otro trabajo. Recargá antes de continuar.'
                     else:
-                        new_job,_ = CrawlJob.objects.get_or_create(submission_id=model_form.cleaned_data['submission_id'],defaults={
-                            'mode':'pilot','start_id':job.start_id,'end_id':job.end_id,'crawl_run':pilot.crawl_run,
-                            'requested_by':request.user.username,'created_at':timezone.now()})
-                        if new_job.mode!='pilot':
-                            error = 'Esta solicitud pertenece a otro trabajo. Recargá antes de continuar.'
+                        config = {k:pilot.config[k] for k in ('contract','prompt') if k in pilot.config}
+                        config.update(reference_required=False,source_pilot_id=pilot.pk,request_settings=model_form.cleaned_data['request_settings'])
+                        new_pilot,created = AnalysisPilot.objects.get_or_create(job=new_job,defaults={
+                            'crawl_run':pilot.crawl_run,'model':model_form.cleaned_data['model'],'created_at':timezone.now(),
+                            'status':'running','phase':'analyze','config':config,'coverage':pilot.coverage,
+                            'reference_locked_at':pilot.reference_locked_at})
+                        if (new_pilot.config.get('source_pilot_id')!=pilot.pk or new_pilot.model!=model_form.cleaned_data['model']
+                                or new_pilot.config.get('request_settings')!=model_form.cleaned_data['request_settings']):
+                            error = 'Esta solicitud ya creó otro piloto. Recargá antes de cambiar el modelo o los límites.'
                         else:
-                            config = {k:pilot.config[k] for k in ('contract','prompt') if k in pilot.config}
-                            config.update(reference_required=False,source_pilot_id=pilot.pk)
-                            new_pilot,created = AnalysisPilot.objects.get_or_create(job=new_job,defaults={
-                                'crawl_run':pilot.crawl_run,'model':model_form.cleaned_data['model'],'created_at':timezone.now(),
-                                'status':'running','phase':'analyze','config':config,'coverage':pilot.coverage,
-                                'reference_locked_at':pilot.reference_locked_at})
-                            if new_pilot.config.get('source_pilot_id')!=pilot.pk or new_pilot.model!=model_form.cleaned_data['model']:
-                                error = 'Esta solicitud ya creó otro piloto. Recargá antes de cambiar el modelo.'
-                            else:
-                                if created:
-                                    AnalysisPilotItem.objects.bulk_create([AnalysisPilotItem(pilot=new_pilot,norm_id=item.norm_id,
-                                        snapshot=item.snapshot,reference=item.reference,split=item.split,laya=item.laya,fingerprint=item.fingerprint,
-                                        metadata={k:v for k,v in item.metadata.items() if k in ('reference_authors','reference_decisions','search_queries')})
-                                        for item in pilot.items.all()])
-                                return redirect('review:pilot_detail',pk=new_pilot.pk)
-                error = error or 'No se creó otro piloto. Revisá el modelo seleccionado.'
+                            if created:
+                                AnalysisPilotItem.objects.bulk_create([AnalysisPilotItem(pilot=new_pilot,norm_id=item.norm_id,
+                                    snapshot=item.snapshot,reference=item.reference,split=item.split,laya=item.laya,fingerprint=item.fingerprint,
+                                    metadata={k:v for k,v in item.metadata.items() if k in ('reference_authors','reference_decisions','search_queries')})
+                                    for item in pilot.items.all()])
+                            return redirect('review:pilot_detail',pk=new_pilot.pk)
+                error = error or 'No se creó otro piloto. Revisá el modelo y los límites indicados abajo.'
             elif request.POST.get('action')=='analyze_now' and pilot.phase=='prepare' and pilot.status=='reference' and pilot.items.exists():
                 # También permite continuar los pilotos creados antes de que la referencia fuera opcional.
                 pilot.config['reference_required'] = False
@@ -259,8 +275,15 @@ def detail(request, pk):
                 pilot.save(update_fields=['reference_locked_at','phase','status','config'])
                 return redirect('review:pilot_detail',pk=pk)
     data = report_data(pilot)
+    effective = pilot.config.get('endpoint',{}).get('request_settings',{})
+    requested = pilot.config.get('request_settings') or effective
     if model_form is None and not pilot.job.active and data['items']:
-        model_form = ModelForm(initial={'submission_id':uuid.uuid4()})
+        initial = {'submission_id':uuid.uuid4(),'model':pilot.model}
+        if 'max_tokens' in requested:
+            initial['max_tokens'] = requested['max_tokens']
+        if requested.get('reasoning'):
+            initial['reasoning_tokens'] = requested['reasoning']['max_tokens']
+        model_form = ModelForm(initial=initial)
     for item in data['items']:
         item.reference_done = sum(r.decision!='pending' for b,r in latest_reviews(item,'reference').items() if b in BLOCKS)
         item.result_done = sum(r.decision!='pending' for b,r in latest_reviews(item,'result',request.user.pk).items() if b in BLOCKS and b!='articles')
@@ -269,7 +292,8 @@ def detail(request, pk):
             _,item.card_exclusions=card_proposals(item,request.user.pk)
     data['published_cards']=ReviewCard.objects.filter(item__pilot=pilot,active=True).count()
     now = timezone.now()
-    data.update(pilot=pilot,error=error,blocks=BLOCKS,model_form=model_form,
+    data.update(pilot=pilot,error=error,blocks=BLOCKS,model_form=model_form,request_settings=requested,
+        reasoning_omitted=bool(effective) and 'reasoning' not in effective,
         heartbeat_age=int((now-pilot.job.heartbeat_at).total_seconds()) if pilot.job.heartbeat_at else None,
         activity_age=int((now-pilot.job.last_activity_at).total_seconds()) if pilot.job.last_activity_at else None)
     return render(request,'review/pilots/detail.html',data,status=400 if error else 200)

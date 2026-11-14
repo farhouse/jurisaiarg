@@ -11,6 +11,7 @@
     <p>{{ form.run.label_tag }}{{ form.run }}{{ form.run.errors }}</p>
     <div class="pilot-field">{{ form.model.label_tag }}{{ form.model }}{{ form.model.errors }}<p class="muted" id="id_model_helptext">{{ form.model.help_text }}</p></div>
     {% if form.catalog_warning %}<p role="status">{{ form.catalog_warning }}</p>{% endif %}
+    {% include 'review/pilots/token_fields.html' with budget_form=form %}
     <details class="pilot-advanced"><summary>Evaluación avanzada · opcional</summary><p>{{ form.reference_required }} {{ form.reference_required.label_tag }}</p><p class="muted">{{ form.reference_required.help_text }} Solo necesitás esta opción para comparar contra una referencia revisada de antemano.</p></details>
     <p><button class="button primary">Analizar muestra del lote</button></p>
   </form>

@@ -4,7 +4,7 @@
 {% block content %}
 <a class="back" href="{% url 'review:pilots' %}">Volver a Pilotos</a>
 <header class="work-heading"><div><h1>Piloto {{ pilot.pk }}</h1><p>{{ pilot.crawl_run.label }} · {{ pilot.status_label }}</p></div><a class="button" href="{% url 'review:pilot_export' pilot.pk %}">Exportar muestra y resultados</a></header>
-{% if pilot.config.source_pilot_id %}<p>Misma muestra del <a href="{% url 'review:pilot_detail' pilot.config.source_pilot_id %}">piloto {{ pilot.config.source_pilot_id }}</a>, analizada con otro modelo.</p>{% endif %}
+{% if pilot.config.source_pilot_id %}<p>Misma muestra del <a href="{% url 'review:pilot_detail' pilot.config.source_pilot_id %}">piloto {{ pilot.config.source_pilot_id }}</a>, en otra ejecución.</p>{% endif %}
 {% if error %}<div class="review-errors" role="alert"><h2>No se pudo iniciar el análisis</h2><p>{{ error }}</p></div>{% endif %}
 <section class="panel">
   <h2>{% if pilot.status == 'reference' %}Muestra lista para analizar{% else %}{{ pilot.job.get_stage_display }}{% endif %}</h2>
@@ -24,14 +24,17 @@
   {% elif pilot.status == 'waiting' %}<form method="post">{% csrf_token %}<input type="hidden" name="action" value="resume"><button class="button primary">Retomar piloto</button></form>{% endif %}
   {% if pilot.job.active %}<p>El análisis continúa en segundo plano. Cuando haya fichas disponibles, podés abrirlas desde el listado.</p>{% endif %}
   <p class="muted pilot-model">Modelo de esta ejecución: {{ pilot.model }}. Solo endpoints gratuitos compatibles; no hay cambio automático a pago.</p>
+  {% if request_settings.max_tokens %}<p>Límite total de salida: <strong>{{ request_settings.max_tokens }} tokens</strong>.{% if request_settings.reasoning %} Límite de razonamiento solicitado: <strong>{{ request_settings.reasoning.max_tokens }} tokens</strong>.{% endif %}</p>{% endif %}
+  {% if reasoning_omitted %}<p class="muted">El endpoint no anuncia control de razonamiento; ese parámetro no se envió.</p>{% endif %}
 </section>
 {% if model_form %}
-<details class="panel pilot-advanced" {% if model_form.is_bound %}open{% endif %}><summary>Probar esta muestra con otro modelo</summary>
-<p>Crea otro piloto con las mismas fuentes guardadas. Los resultados y las revisiones de este piloto se conservan.</p>
+<details class="panel pilot-advanced" {% if model_form.is_bound %}open{% endif %}><summary>Volver a analizar esta muestra</summary>
+<p>Podés cambiar el modelo o los límites de tokens. Se crea otro piloto con las mismas fuentes guardadas; este conserva sus resultados y revisiones.</p>
 <form method="post">{% csrf_token %}<input type="hidden" name="action" value="compare_model">{{ model_form.submission_id }}{{ model_form.submission_id.errors }}{{ model_form.non_field_errors }}
 <div class="pilot-field">{{ model_form.model.label_tag }}{{ model_form.model }}{{ model_form.model.errors }}<p class="muted" id="id_model_helptext">{{ model_form.model.help_text }}</p></div>
 {% if model_form.catalog_warning %}<p role="status">{{ model_form.catalog_warning }}</p>{% endif %}
-<button class="button primary">Crear piloto con este modelo</button></form></details>
+{% include 'review/pilots/token_fields.html' with budget_form=model_form %}
+<button class="button primary">Crear piloto con esta configuración</button></form></details>
 {% endif %}
 {% if items %}
 <section class="panel"><h2>Tarjetas para colaboradores</h2>

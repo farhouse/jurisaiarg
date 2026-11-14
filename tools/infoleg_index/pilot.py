@@ -16,7 +16,8 @@ from psycopg.types.json import Jsonb
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'web' / 'review') if len(Path(__file__).resolve().parents) > 2 else '/app')
 from pilot_contract import (VERSION, PROMPT_VERSION, DEFAULT_MODEL, SCHEMA, INSTRUCTIONS,
-                            fingerprint, empty_result, validate_result, analysis_resources)
+                            fingerprint, empty_result, validate_result, analysis_resources,
+                            request_budget, DEFAULT_MAX_TOKENS, DEFAULT_REASONING_TOKENS)
 from parser import parse_articles, parse_card, PARSER_VERSION
 from references import extract_references
 from legal_parser import extract_legal_changes, normalize_norm_number, NOTE_BLOCK
@@ -51,23 +52,28 @@ def request_json(path, key, payload=None, timeout=120):
         raise PilotError('OpenRouter devolvió una respuesta que no es JSON válido.') from None
 
 
-def generation_settings():
+def generation_settings(settings=None):
     try:
-        output = int(os.environ.get('JURISAI_PILOT_MAX_TOKENS','32768'))
-        reasoning = int(os.environ.get('JURISAI_PILOT_REASONING_TOKENS','4096'))
-    except ValueError:
-        raise PilotError('JURISAI_PILOT_MAX_TOKENS y JURISAI_PILOT_REASONING_TOKENS deben ser números enteros.') from None
-    if not 2048<=output<=131072 or not 1024<=reasoning<=output-1024:
-        raise PilotError('El presupuesto de salida debe estar entre 2048 y 131072 tokens; el de razonamiento debe ser al menos 1024 y dejar otros 1024 para la ficha.')
-    return {'max_tokens':output,'reasoning':{'max_tokens':reasoning}}
+        if settings is None:
+            output = int(os.environ.get('JURISAI_PILOT_MAX_TOKENS',DEFAULT_MAX_TOKENS))
+            reasoning = int(os.environ.get('JURISAI_PILOT_REASONING_TOKENS',DEFAULT_REASONING_TOKENS))
+        else:
+            output,reasoning = settings['max_tokens'],settings['reasoning']['max_tokens']
+    except (ValueError,TypeError,KeyError):
+        raise PilotError('Los límites del piloto deben incluir números enteros de salida y razonamiento. Revisá su configuración en Gestión o los valores predeterminados del servidor.') from None
+    try:
+        return request_budget(output,reasoning)
+    except ValueError as exc:
+        raise PilotError(str(exc)) from None
 
 
-def preflight(model):
+def preflight(model, settings=None):
     key = os.environ.get('OPENROUTER_API_KEY', '').strip()
     if not key:
         raise PilotError('Falta OPENROUTER_API_KEY en el contenedor crawler. Configurala y recreá ese servicio.')
     if not model.endswith(':free'):
         raise PilotError('El piloto solo admite un modelo fijo con etiqueta :free; no se habilitan modelos pagos.')
+    settings = generation_settings(settings)
     data, _ = request_json('models/' + quote(model, safe='/:') + '/endpoints', key)
     eligible = []
     for endpoint in data.get('data', {}).get('endpoints', []):
@@ -80,7 +86,6 @@ def preflight(model):
             eligible.append(endpoint)
     if not eligible:
         raise PilotError('El modelo fijo no tiene endpoints gratuitos con salida estructurada disponibles. No se eligió otro modelo.')
-    settings = generation_settings()
     reasoning_endpoints = [e for e in eligible if 'reasoning' in e.get('supported_parameters',[])]
     if reasoning_endpoints:
         eligible = reasoning_endpoints
@@ -88,7 +93,7 @@ def preflight(model):
         settings.pop('reasoning')
     limits = [e['max_completion_tokens'] for e in eligible if isinstance(e.get('max_completion_tokens'),int) and e['max_completion_tokens']>0]
     if limits and settings['max_tokens']>min(limits):
-        raise PilotError(f"El presupuesto de salida supera el límite de {min(limits)} tokens del endpoint. Reducí JURISAI_PILOT_MAX_TOKENS y retomá.")
+        raise PilotError(f"El presupuesto de salida supera el límite de {min(limits)} tokens del endpoint. Desde Gestión, creá otra ejecución de la muestra con un límite total menor.")
     return {'context_length': min(e.get('context_length') or 0 for e in eligible),
             'endpoints': [e.get('name', e.get('provider_name', '')) for e in eligible], 'request_settings':settings}
 
@@ -157,7 +162,7 @@ def infer(snapshot, laya, model, capacity, settings=None):
         counts = f" Tokens de salida informados: {usage['completion_tokens']}." if 'completion_tokens' in usage else ''
         if 'reasoning_tokens' in usage: counts += f" De razonamiento: {usage['reasoning_tokens']}."
         raise PilotError(f"El modelo alcanzó el límite de salida de {payload['max_tokens']} tokens antes de terminar la ficha.{counts} "
-            'Revisá JURISAI_PILOT_MAX_TOKENS y JURISAI_PILOT_REASONING_TOKENS en el crawler; si el límite vuelve a resultar insuficiente, la norma requiere análisis por partes. '
+            'Desde Gestión, volvé a analizar la muestra ajustando el límite total y el de razonamiento; si el límite vuelve a resultar insuficiente, la norma requiere análisis por partes. '
             'Esperar cupo no resuelve este corte. No se aceptó una ficha parcial.',metadata)
     if finish=='content_filter' or message.get('refusal'):
         raise PilotError('El proveedor o el modelo rechazó la solicitud. Revisá la entrada y las restricciones del modelo en OpenRouter antes de retomar. No se aceptó una ficha parcial.',metadata)
@@ -365,7 +370,7 @@ def laya_stage(con, pilot_id, report):
 def analyze(con, pilot_id, job_id, report):
     model, config = con.execute('SELECT model,config FROM analysis_pilots WHERE id=%s', (pilot_id,)).fetchone()
     capacity = config['endpoint']['context_length']
-    settings = config['endpoint'].get('request_settings') or generation_settings()
+    settings = config['endpoint'].get('request_settings') or generation_settings(config.get('request_settings'))
     rows = con.execute('SELECT id,snapshot,laya,status,fingerprint FROM analysis_pilot_items WHERE pilot_id=%s ORDER BY id', (pilot_id,)).fetchall()
     for done, (pk, snapshot, laya, status, key) in enumerate(rows, 1):
         if status == 'done':
@@ -412,7 +417,7 @@ def main():
                 model, config = con.execute('SELECT model,config FROM analysis_pilots WHERE id=%s', (pilot_id,)).fetchone()
                 if config.get('contract') != VERSION or config.get('prompt') != PROMPT_VERSION:
                     raise PilotError('Cambió la versión del análisis. Prepará un piloto nuevo para conservar una comparación reproducible.')
-                endpoint = preflight(model)
+                endpoint = preflight(model,config.get('request_settings'))
                 con.execute("UPDATE analysis_pilots SET config=config || %s,status='running' WHERE id=%s",
                     (Jsonb({'endpoint': endpoint, 'contract': VERSION, 'prompt': PROMPT_VERSION}), pilot_id))
                 con.commit()

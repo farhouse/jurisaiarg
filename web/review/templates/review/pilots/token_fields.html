@@ -1,0 +1,7 @@
+<fieldset class="pilot-token-limits">
+  <legend>Límites de tokens por solicitud</legend>
+  <div class="pilot-budget-fields">
+    <div class="pilot-field">{{ budget_form.max_tokens.label_tag }}{{ budget_form.max_tokens }}{{ budget_form.max_tokens.errors }}<p class="muted" id="id_max_tokens_helptext">{{ budget_form.max_tokens.help_text }}</p></div>
+    <div class="pilot-field">{{ budget_form.reasoning_tokens.label_tag }}{{ budget_form.reasoning_tokens }}{{ budget_form.reasoning_tokens.errors }}<p class="muted" id="id_reasoning_tokens_helptext">{{ budget_form.reasoning_tokens.help_text }}</p></div>
+  </div>
+</fieldset>

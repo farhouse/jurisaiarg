@@ -126,14 +126,23 @@ class PilotContractTest(unittest.TestCase):
         with patch.dict(os.environ,{'OPENROUTER_API_KEY':'test-secret','JURISAI_PILOT_MAX_TOKENS':'32768','JURISAI_PILOT_REASONING_TOKENS':'4096'}):
             with patch('pilot.request_json',return_value=({'data':{'endpoints':[endpoint]}},{})):
                 self.assertEqual(pilot.preflight(DEFAULT_MODEL)['request_settings'],{'max_tokens':32768,'reasoning':{'max_tokens':4096}})
+                frozen={'max_tokens':16384,'reasoning':{'max_tokens':2048}}
+                self.assertEqual(pilot.preflight(DEFAULT_MODEL,frozen)['request_settings'],frozen)
             without_reasoning={**endpoint,'supported_parameters':['structured_outputs','response_format']}
             with patch('pilot.request_json',return_value=({'data':{'endpoints':[without_reasoning]}},{})):
                 self.assertEqual(pilot.preflight(DEFAULT_MODEL)['request_settings'],{'max_tokens':32768})
+                self.assertEqual(pilot.preflight(DEFAULT_MODEL,frozen)['request_settings'],{'max_tokens':16384})
+                self.assertEqual(frozen,{'max_tokens':16384,'reasoning':{'max_tokens':2048}})
             with patch('pilot.request_json',return_value=({'data':{'endpoints':[{**endpoint,'max_completion_tokens':16000}]}},{})),self.assertRaises(pilot.PilotError):
                 pilot.preflight(DEFAULT_MODEL)
             for output,reasoning in [('texto','4096'),('32768','0'),('4096','4096'),('200000','4096')]:
                 with self.subTest(output=output,reasoning=reasoning),patch.dict(os.environ,{'JURISAI_PILOT_MAX_TOKENS':output,'JURISAI_PILOT_REASONING_TOKENS':reasoning}),self.assertRaises(pilot.PilotError):
                     pilot.generation_settings()
+            for bad in ({},{'max_tokens':True,'reasoning':{'max_tokens':1024}},
+                    {'max_tokens':32768,'reasoning':{'max_tokens':32768}}):
+                with self.subTest(settings=bad),patch('pilot.request_json') as api,self.assertRaises(pilot.PilotError):
+                    pilot.preflight(DEFAULT_MODEL,bad)
+                api.assert_not_called()
 
 
 @unittest.skipUnless(os.getenv('CRAWLER_TEST_DSN'),'requiere PostgreSQL test_ aislado')
@@ -164,7 +173,8 @@ class PilotIntegrationTest(unittest.TestCase):
             item,snapshot,reference,key = con.execute('SELECT id,snapshot,reference,fingerprint FROM analysis_pilot_items WHERE pilot_id=%s',(pk,)).fetchone()
             validate_result(reference,snapshot)
             meta = {'request_id':'one','requested':True,'usage':{'total_tokens':100,'cost':0},'seconds':1}
-            con.execute("UPDATE analysis_pilots SET config=config || %s WHERE id=%s",(Jsonb({'endpoint':{'context_length':1000000}}),pk))
+            frozen={'max_tokens':16384,'reasoning':{'max_tokens':2048}}
+            con.execute("UPDATE analysis_pilots SET config=config || %s WHERE id=%s",(Jsonb({'endpoint':{'context_length':1000000},'request_settings':frozen}),pk))
             con.execute("UPDATE analysis_pilot_items SET metadata=%s WHERE id=%s",(Jsonb({'reference_authors':{'summary':'first'},'reference_decisions':{'summary':'confirmed'}}),item))
             con.commit()
             failed={'requested':True,'finish_reason':'length','usage':{'completion_tokens':8192,'reasoning_tokens':8192}}
@@ -176,6 +186,7 @@ class PilotIntegrationTest(unittest.TestCase):
             with patch('pilot.infer',return_value=(reference,meta)) as infer:
                 pilot.analyze(con,pk,job,lambda *a,**k:None)
                 self.assertEqual(infer.call_count,1)
+                self.assertEqual(infer.call_args.args[4],frozen)
                 pilot.analyze(con,pk,job,lambda *a,**k:None)
                 self.assertEqual(infer.call_count,1)
             self.assertEqual(len(con.execute('SELECT metadata FROM analysis_pilot_items WHERE id=%s',(item,)).fetchone()[0]['attempts']),2)

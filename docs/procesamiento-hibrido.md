@@ -330,23 +330,35 @@ variables nuevas a los contenedores: hay que usar el Compose actualizado y
 recrearlos. `.env` queda fuera de Git y `.env.example` no contiene secretos.
 La clave nunca se guarda en el piloto, en el navegador o en los logs.
 
-El presupuesto total de salida incluye razonamiento y JSON. El piloto solicita
-32.768 tokens totales y limita el razonamiento a 4.096 en endpoints que anuncian
-ese soporte. En modelos sin razonamiento se omite ese parámetro. La comprobación
+El presupuesto total de salida incluye razonamiento y JSON. **Gestión → Pilotos**
+permite configurar **Límite total de salida** y **Límite de razonamiento** al crear
+una ejecución. Los valores iniciales son 32.768 y 4.096, o los predeterminados del
+`.env` que recibe `web` con el Compose actualizado. Se guardan en
+`config.request_settings`; cambios posteriores del servidor no modifican esos
+valores. La salida admite entre 2.048 y 131.072 tokens. El razonamiento debe tener
+al menos 1.024 y reservar otros 1.024 para el JSON dentro del total. El formulario
+y el trabajador comparten esta validación.
+
+Se solicita el límite de razonamiento en endpoints que anuncian ese soporte.
+En modelos sin ese control se omite el parámetro y se avisa en el detalle.
+La comprobación
 previa valida los presupuestos y el límite de salida anunciado por el endpoint.
 Cada intento conserva sus ajustes, motivo de finalización, consumo total y tokens
 de razonamiento informados; no guarda el razonamiento interno ni respuestas parciales.
 Los ajustes forman parte de la clave de reutilización entre pilotos.
 
-Un error `length` significa que se agotó la salida, no que falte cupo. Revisar
-estos presupuestos, recrear `crawler` y usar **Retomar piloto**; las fichas ya
-terminadas se conservan. Una norma que siga excediendo el presupuesto queda
+Un error `length` significa que se agotó la salida, no que falte cupo. Desde el
+detalle se puede **Volver a analizar esta muestra** con otros límites, incluso
+conservando el mismo modelo. Esa acción crea otro piloto y mantiene intactos los
+resultados previos. **Retomar piloto** conserva su configuración guardada y sigue
+con sus tareas pendientes. Los pilotos antiguos sin límites propios siguen usando
+los predeterminados del crawler. Una norma que siga excediendo el presupuesto queda
 pendiente de análisis por partes. No se recorta ni se acepta un JSON incompleto.
 Las solicitudes de generación tienen un tiempo de espera de 360 segundos; un
 fallo de conexión también conserva el trabajo previo.
 
 1. Entrar como administrador en **Gestión → Pilotos**, elegir un lote terminado y
-   el **Modelo de OpenRouter**. La elección queda guardada en esa ejecución, aunque
+   el **Modelo de OpenRouter** y los límites de tokens. La elección queda guardada en esa ejecución, aunque
    después cambie la variable predeterminada del servidor.
 2. Pulsar **Analizar muestra del lote**. El trabajador conserva el HTML y su
    extracción dentro del piloto, comprueba OpenRouter, ejecuta Laya en un subproceso
@@ -373,9 +385,10 @@ elegir **Analizar ahora**. Continúa sobre la muestra ya congelada sin exigir
 decisiones. Conserva los borradores e historial de referencia, sin presentarlos
 como respuestas correctas ni permitir cambiarlos durante el análisis.
 
-**Comparar modelos sobre la misma muestra:** cuando el piloto no esté en cola ni
-ejecutándose, abrir **Probar esta muestra con otro modelo** en su detalle. Elegir
-otro modelo y pulsar **Crear piloto con este modelo**. Se crea una ejecución
+**Comparar configuraciones sobre la misma muestra:** cuando el piloto no esté en cola ni
+ejecutándose, abrir **Volver a analizar esta muestra** en su detalle. El formulario
+parte del modelo y los límites guardados. Elegir otro modelo o ajustar los tokens,
+y pulsar **Crear piloto con esta configuración**. Se crea una ejecución
 separada con las fuentes congeladas, la misma selección y grupo reservado, y los
 resultados de Laya ya disponibles. No se descargan otra vez las fuentes ni se
 mezclan salidas de modelos. Se conserva la referencia congelada y su procedencia,

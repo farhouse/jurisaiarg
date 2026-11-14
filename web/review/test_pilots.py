@@ -8,14 +8,28 @@ from django.db import connection
 from django.test import TransactionTestCase,Client,SimpleTestCase
 from django.utils import timezone
 from .models import Norm,CrawlRun,CrawlJob,AnalysisPilot,AnalysisPilotItem,AnalysisPilotEvaluation,ReviewCard,CardResponse
-from .pilot_contract import empty_result,DEFAULT_MODEL,VERSION,PROMPT_VERSION
-from .pilots import model_choices
+from .pilot_contract import empty_result,DEFAULT_MODEL,VERSION,PROMPT_VERSION,request_budget
+from .pilots import model_choices,ModelForm
+
+LIMITS={'max_tokens':32768,'reasoning_tokens':4096}
 
 
 class ModelCatalogTest(SimpleTestCase):
     def setUp(self):
         cache.delete('jurisai.pilot-models.v1')
         self.addCleanup(cache.delete,'jurisai.pilot-models.v1')
+
+    def test_token_limits_validate_integer_bounds_and_reserve_json_output(self):
+        valid={'model':DEFAULT_MODEL,'submission_id':uuid.uuid4(),**LIMITS}
+        with patch('review.pilots.model_choices',return_value=([(DEFAULT_MODEL,'Nemotron')],'')):
+            form=ModelForm(valid)
+            self.assertTrue(form.is_valid())
+            self.assertEqual(form.cleaned_data['request_settings'],request_budget(32768,4096))
+            for changes in ({'max_tokens':'texto'},{'max_tokens':-1},{'max_tokens':131073},
+                    {'reasoning_tokens':0},{'reasoning_tokens':32768},{'max_tokens':4096,'reasoning_tokens':4096}):
+                with self.subTest(changes=changes):
+                    form=ModelForm({**valid,**changes});self.assertFalse(form.is_valid())
+                    self.assertTrue('max_tokens' in form.errors or 'reasoning_tokens' in form.errors)
 
     def test_public_catalog_only_offers_free_structured_models_and_is_cached(self):
         good={'id':'test/compatible:free','name':'Compatible','pricing':{'prompt':'0','completion':'0'},
@@ -79,7 +93,7 @@ class PilotsTest(TransactionTestCase):
         self.client.force_login(validator)
         self.assertEqual(self.client.get('/gestion/pilotos/').status_code,403)
         self.client.force_login(admin)
-        response = self.client.post('/gestion/pilotos/',{'run':run.pk,'model':DEFAULT_MODEL,'submission_id':uuid.uuid4(),'reference_required':'on'})
+        response = self.client.post('/gestion/pilotos/',{'run':run.pk,'model':DEFAULT_MODEL,'submission_id':uuid.uuid4(),'reference_required':'on',**LIMITS})
         self.assertEqual(response.status_code,302)
         pilot = AnalysisPilot.objects.get()
         job = pilot.job;job.status='done';job.save()
@@ -142,9 +156,9 @@ class PilotsTest(TransactionTestCase):
             general_status='desconocida',index_status='solo_texto_original',article_count=1)
         run = CrawlRun.objects.create(requested_ids=[1],started_at=now,finished_at=now,status='ok',processed_count=1)
         submission = uuid.uuid4()
-        response = self.client.post('/gestion/pilotos/',{'run':run.pk,'model':DEFAULT_MODEL,'submission_id':submission})
+        response = self.client.post('/gestion/pilotos/',{'run':run.pk,'model':DEFAULT_MODEL,'submission_id':submission,**LIMITS})
         self.assertEqual(response.status_code,302)
-        self.assertEqual(self.client.post('/gestion/pilotos/',{'run':run.pk,'model':DEFAULT_MODEL,'submission_id':submission}).url,response.url)
+        self.assertEqual(self.client.post('/gestion/pilotos/',{'run':run.pk,'model':DEFAULT_MODEL,'submission_id':submission,**LIMITS}).url,response.url)
         pilot = AnalysisPilot.objects.get()
         self.assertFalse(pilot.config['reference_required'])
         pilot.config.pop('reference_required')  # Un piloto creado con la versión anterior.
@@ -197,7 +211,7 @@ class PilotsTest(TransactionTestCase):
         norm=Norm.objects.create(infoleg_id=1,norm_type='Ley',number='23600',canonical_title='EXPROPIACIONES',
             general_status='desconocida',index_status='solo_texto_original',article_count=1)
         run=CrawlRun.objects.create(requested_ids=[1],started_at=now,finished_at=now,status='ok',processed_count=1)
-        data={'run':run.pk,'model':'test/alternate:free','submission_id':uuid.uuid4()}
+        data={'run':run.pk,'model':'test/alternate:free','submission_id':uuid.uuid4(),'max_tokens':49152,'reasoning_tokens':2048}
         for invalid in ('paid/model','unknown/model:free'):
             self.assertEqual(self.client.post('/gestion/pilotos/',{**data,'model':invalid}).status_code,400)
         self.assertEqual(AnalysisPilot.objects.count(),0)
@@ -205,8 +219,10 @@ class PilotsTest(TransactionTestCase):
         self.assertEqual(response.status_code,302)
         original=AnalysisPilot.objects.get()
         self.assertEqual(original.model,'test/alternate:free')
+        self.assertEqual(original.config['request_settings'],request_budget(49152,2048))
         self.assertEqual(self.client.post('/gestion/pilotos/',data).url,response.url)
         self.assertEqual(self.client.post('/gestion/pilotos/',{**data,'model':DEFAULT_MODEL}).status_code,400)
+        self.assertEqual(self.client.post('/gestion/pilotos/',{**data,'max_tokens':65536}).status_code,400)
         self.assertEqual(AnalysisPilot.objects.count(),1)
         job=original.job;job.status='done';job.save()
         original.status='waiting';original.phase='analyze';original.reference_locked_at=now
@@ -224,22 +240,25 @@ class PilotsTest(TransactionTestCase):
         CardResponse.objects.create(card=card,user_id=validator.pk,username=validator.username,action='answer',decision='skip',
             request_id=uuid.uuid4(),created_at=now)
         before_item=list(AnalysisPilotItem.objects.values());before_pilot=list(AnalysisPilot.objects.values())
-        compare={'action':'compare_model','model':DEFAULT_MODEL,'submission_id':uuid.uuid4()}
+        compare={'action':'compare_model','model':original.model,'submission_id':uuid.uuid4(),**LIMITS}
         protected=Client(enforce_csrf_checks=True);protected.force_login(admin)
         self.assertEqual(protected.post(response.url,compare).status_code,403)
         self.client.force_login(validator);self.assertEqual(self.client.post(response.url,compare).status_code,403)
         self.client.force_login(admin)
-        same=self.client.post(response.url,{**compare,'model':original.model})
-        self.assertEqual(same.status_code,400);self.assertContains(same,'modelo diferente',status_code=400)
+        invalid=self.client.post(response.url,{**compare,'reasoning_tokens':32768})
+        self.assertEqual(invalid.status_code,400);self.assertContains(invalid,'para la ficha JSON',status_code=400)
+        initial=self.client.get(response.url).context['model_form']
+        self.assertEqual(initial['max_tokens'].value(),49152);self.assertEqual(initial['reasoning_tokens'].value(),2048)
         job.status='running';job.save()
         self.assertEqual(self.client.post(response.url,compare).status_code,400)
         job.status='done';job.save()
         created=self.client.post(response.url,compare)
         self.assertEqual(created.status_code,302)
         copied=AnalysisPilot.objects.exclude(pk=original.pk).get()
-        self.assertEqual(copied.model,DEFAULT_MODEL);self.assertEqual(copied.crawl_run_id,run.pk)
+        self.assertEqual(copied.model,original.model);self.assertEqual(copied.crawl_run_id,run.pk)
         self.assertEqual(copied.phase,'analyze');self.assertEqual(copied.job.status,'queued')
-        self.assertEqual(copied.config,{'contract':VERSION,'prompt':PROMPT_VERSION,'reference_required':False,'source_pilot_id':original.pk})
+        self.assertEqual(copied.config,{'contract':VERSION,'prompt':PROMPT_VERSION,'reference_required':False,
+            'source_pilot_id':original.pk,'request_settings':request_budget(32768,4096)})
         self.assertEqual(copied.reference_locked_at,now);self.assertEqual(copied.coverage,original.coverage)
         fresh=copied.items.get()
         self.assertEqual(fresh.snapshot,snapshot);self.assertEqual(fresh.reference,result)
@@ -252,4 +271,5 @@ class PilotsTest(TransactionTestCase):
         self.assertEqual(list(AnalysisPilot.objects.filter(pk=original.pk).values()),before_pilot)
         self.assertEqual(CardResponse.objects.count(),1);self.assertEqual(AnalysisPilotEvaluation.objects.count(),1)
         self.assertEqual(self.client.post(response.url,compare).url,created.url)
+        self.assertEqual(self.client.post(response.url,{**compare,'max_tokens':65536}).status_code,400)
         self.assertEqual(AnalysisPilot.objects.count(),2);self.assertEqual(CrawlJob.objects.count(),2)

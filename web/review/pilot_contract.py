@@ -6,10 +6,22 @@ from urllib.parse import urlsplit
 VERSION = 'jurisai-pilot-v1'
 PROMPT_VERSION = 'norm-context-v1'
 DEFAULT_MODEL = 'nvidia/nemotron-3.5-super-vl:free'
+DEFAULT_MAX_TOKENS = 32768
+DEFAULT_REASONING_TOKENS = 4096
 MATTERS = ['Civil y comercial', 'Laboral', 'Familia', 'Penal', 'Administrativo',
            'Tributario', 'Constitucional', 'Seguridad social', 'Ambiental', 'Consumidor']
 BLOCKS = {'summary': 'Resumen', 'matters': 'Materias', 'concepts': 'Conceptos',
           'relations': 'Relaciones', 'articles': 'Función de los artículos'}
+
+
+def request_budget(max_tokens, reasoning_tokens):
+    if type(max_tokens) is not int or type(reasoning_tokens) is not int:
+        raise ValueError('Los límites de tokens deben ser números enteros.')
+    if not 2048<=max_tokens<=131072:
+        raise ValueError('El límite total de salida debe estar entre 2.048 y 131.072 tokens.')
+    if not 1024<=reasoning_tokens<=max_tokens-1024:
+        raise ValueError('El razonamiento debe tener al menos 1.024 tokens y dejar otros 1.024 para la ficha JSON dentro del límite total.')
+    return {'max_tokens':max_tokens,'reasoning':{'max_tokens':reasoning_tokens}}
 
 
 def analysis_resources(resources):
