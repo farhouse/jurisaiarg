@@ -21,7 +21,7 @@ from django.views.decorators.http import require_http_methods, require_GET
 
 from .models import AnalysisPilot, AnalysisPilotItem, AnalysisPilotEvaluation, CrawlJob, CrawlRun, Norm, ReviewCard
 from .pilot_contract import (BLOCKS, DEFAULT_MODEL, VERSION, PROMPT_VERSION, analysis_resources,
-    request_budget, DEFAULT_MAX_TOKENS, DEFAULT_REASONING_TOKENS, STAGE_CHOICES, processing_stages)
+    request_budget, DEFAULT_MAX_TOKENS, DEFAULT_REASONING_TOKENS, STAGE_CHOICES, processing_stages, norm_groups)
 from .pilot_forms import BlockForm
 from .workflow import staff_required
 
@@ -71,7 +71,11 @@ class ModelForm(forms.Form):
     submission_id = forms.UUIDField(widget=forms.HiddenInput)
 
     def __init__(self, *args, **kwargs):
+        items = kwargs.pop('items',None)
         super().__init__(*args, **kwargs)
+        if items is not None:
+            self.fields['items'] = forms.ModelMultipleChoiceField(queryset=items,
+                error_messages={'required':'Marcá al menos una norma en la tabla.','invalid_choice':'La selección contiene una norma que no pertenece a este piloto.'})
         selected = self.data.getlist('stages') if hasattr(self.data,'getlist') else self.data.get('stages',[])
         laya_only = self.is_bound and selected==['laya']
         choices,self.catalog_warning = ([(DEFAULT_MODEL,DEFAULT_MODEL+' · comprobar al ejecutar')], '') if laya_only else model_choices()
@@ -88,6 +92,8 @@ class ModelForm(forms.Form):
 
     def clean(self):
         data = super().clean()
+        if 'items' in data and len(data['items'])>30:
+            self.add_error('items','Elegí hasta 30 normas por bloque.')
         if data.get('stages'):
             data['stages'] = processing_stages({'stages':data['stages']})
         if data.get('stages')==['laya']:
@@ -113,6 +119,29 @@ class PrepareForm(ModelForm):
         self.fields['run'].label_from_instance = lambda run: run.label
 
 
+class GroupForm(forms.Form):
+    run = forms.ModelChoiceField(label='Lote descargado',queryset=CrawlRun.objects.none())
+
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs)
+        self.fields['run'].queryset = CrawlRun.objects.filter(status__in=['ok','partial'],finished_at__isnull=False).exclude(requested_ids=[]).exclude(requested_ids=None)
+        self.fields['run'].label_from_instance = lambda run:run.label
+
+
+def create_groups(run, username):
+    ids = list(run.items.exclude(norm_id=None).filter(status__in=['completa','solo_texto_original','solo_ficha']).values_list('norm_id',flat=True))
+    groups=[]
+    with transaction.atomic():
+        for submission,config in norm_groups(run.pk,ids):
+            job,_ = CrawlJob.objects.get_or_create(submission_id=submission,defaults={'mode':'pilot',
+                'start_id':min(run.requested_ids),'end_id':min(run.requested_ids),'crawl_run':run,
+                'requested_by':username,'created_at':timezone.now()})
+            pilot,_ = AnalysisPilot.objects.get_or_create(job=job,defaults={'crawl_run':run,'model':DEFAULT_MODEL,
+                'config':config,'created_at':timezone.now()})
+            groups.append(pilot)
+    return groups
+
+
 def latest_reviews(item, phase, user_id=None):
     query = item.evaluations.filter(phase=phase)
     if user_id is not None:
@@ -123,9 +152,16 @@ def latest_reviews(item, phase, user_id=None):
 @staff_required
 @require_http_methods(['GET','POST'])
 def index(request):
-    form = PrepareForm(request.POST if request.method=='POST' else None, initial={
+    grouping = request.POST.get('action')=='groups'
+    group_form = GroupForm(request.POST if grouping else None,auto_id='group_%s')
+    if request.method=='POST' and grouping and group_form.is_valid():
+        groups = create_groups(group_form.cleaned_data['run'],request.user.username)
+        if groups:
+            return redirect('review:pilot_detail',pk=groups[0].pk)
+        group_form.add_error('run','Este lote no tiene normas extraídas. Revisá los errores de la descarga.')
+    form = PrepareForm(request.POST if request.method=='POST' and not grouping else None, initial={
         'submission_id':uuid.uuid4(),'model':os.environ.get('JURISAI_PILOT_MODEL',DEFAULT_MODEL)})
-    if request.method=='POST' and form.is_valid():
+    if request.method=='POST' and not grouping and form.is_valid():
         run = form.cleaned_data['run']
         with transaction.atomic():
             job, _ = CrawlJob.objects.get_or_create(submission_id=form.cleaned_data['submission_id'], defaults={
@@ -144,7 +180,7 @@ def index(request):
                     form.add_error(None,'Esta solicitud ya creó otro piloto. Recargá antes de cambiar el modelo, los límites o el lote.')
                 else:
                     return redirect('review:pilot_detail', pk=pilot.pk)
-    return render(request,'review/pilots/index.html',{'form':form,'pilots':AnalysisPilot.objects.select_related('job','crawl_run')[:50]},
+    return render(request,'review/pilots/index.html',{'form':form,'group_form':group_form,'pilots':AnalysisPilot.objects.select_related('job','crawl_run')[:50]},
                   status=400 if request.method=='POST' else 200)
 
 
@@ -231,7 +267,7 @@ def detail(request, pk):
             if job.active:
                 error = 'El trabajo ya está en cola o ejecutándose.'
             elif request.POST.get('action')=='compare_model' and pilot.items.exists():
-                model_form = ModelForm(request.POST)
+                model_form = ModelForm(request.POST,items=pilot.items.all())
                 if model_form.is_valid():
                     new_job,_ = CrawlJob.objects.get_or_create(submission_id=model_form.cleaned_data['submission_id'],defaults={
                         'mode':'pilot','start_id':job.start_id,'end_id':job.end_id,'crawl_run':pilot.crawl_run,
@@ -241,24 +277,39 @@ def detail(request, pk):
                     else:
                         config = {k:pilot.config[k] for k in ('contract','prompt') if k in pilot.config}
                         config.update(reference_required=False,source_pilot_id=pilot.pk,
+                            source_item_ids=sorted(model_form.cleaned_data['items'].values_list('pk',flat=True)),
                             stages=model_form.cleaned_data['stages'],request_settings=model_form.cleaned_data['request_settings'])
+                        group_id = pilot.pk if pilot.config.get('group') else pilot.config.get('group_pilot_id')
+                        if group_id:
+                            config['group_pilot_id']=group_id
                         new_pilot,created = AnalysisPilot.objects.get_or_create(job=new_job,defaults={
                             'crawl_run':pilot.crawl_run,'model':model_form.cleaned_data['model'],'created_at':timezone.now(),
-                            'status':'running','phase':'analyze','config':config,'coverage':pilot.coverage,
+                            'status':'running','phase':'analyze','config':config,
+                            'coverage':{**pilot.coverage,'selected':len(model_form.cleaned_data['items']),
+                                'with_references':sum(bool(i.snapshot.get('candidates')) for i in model_form.cleaned_data['items']),
+                                'updated':sum(i.snapshot.get('source',{}).get('version')=='actualizada' for i in model_form.cleaned_data['items'])},
                             'reference_locked_at':pilot.reference_locked_at})
                         if (new_pilot.config.get('source_pilot_id')!=pilot.pk or new_pilot.model!=model_form.cleaned_data['model']
                                 or new_pilot.config.get('request_settings')!=model_form.cleaned_data['request_settings']
-                                or processing_stages(new_pilot.config)!=model_form.cleaned_data['stages']):
-                            error = 'Esta solicitud ya creó otro piloto. Recargá antes de cambiar el modelo o los límites.'
+                                or processing_stages(new_pilot.config)!=model_form.cleaned_data['stages']
+                                or new_pilot.config.get('source_item_ids')!=config['source_item_ids']):
+                            error = 'Esta solicitud ya creó otro piloto. Recargá antes de cambiar las normas, etapas, modelo o límites.'
                         else:
                             if created:
+                                selected_items = list(model_form.cleaned_data['items'])
+                                for item in selected_items:
+                                    item.laya_origin_id=item.pk
+                                    if not item.laya or item.laya.get('error'):
+                                        previous = AnalysisPilotItem.objects.filter(norm_id=item.norm_id,snapshot=item.snapshot).exclude(laya={}).exclude(laya__has_key='error').order_by('-pk').first()
+                                        if previous:
+                                            item.laya,item.laya_origin_id=previous.laya,previous.pk
                                 AnalysisPilotItem.objects.bulk_create([AnalysisPilotItem(pilot=new_pilot,norm_id=item.norm_id,
                                     snapshot=item.snapshot,reference=item.reference,split=item.split,laya=item.laya,fingerprint=item.fingerprint,
                                     metadata={**{k:v for k,v in item.metadata.items() if k in ('reference_authors','reference_decisions','search_queries')},
-                                        **({'laya_reused':True,'laya_source_item_id':item.pk} if item.laya and not item.laya.get('error') else {})})
-                                    for item in pilot.items.all()])
+                                        **({'laya_reused':True,'laya_source_item_id':item.laya_origin_id} if item.laya and not item.laya.get('error') else {})})
+                                    for item in selected_items])
                             return redirect('review:pilot_detail',pk=new_pilot.pk)
-                error = error or 'No se creó otro piloto. Revisá el modelo y los límites indicados abajo.'
+                error = error or 'No se creó otro piloto. Revisá las normas, etapas y configuración indicadas abajo.'
             elif request.POST.get('action')=='analyze_now' and pilot.phase=='prepare' and pilot.status=='reference' and pilot.items.exists():
                 # También permite continuar los pilotos creados antes de que la referencia fuera opcional.
                 pilot.config['reference_required'] = False
@@ -301,12 +352,14 @@ def detail(request, pk):
     effective = pilot.config.get('endpoint',{}).get('request_settings',{})
     requested = pilot.config.get('request_settings') or effective
     if model_form is None and not pilot.job.active and data['items']:
-        initial = {'submission_id':uuid.uuid4(),'model':pilot.model,'stages':['llm']}
+        initial = {'submission_id':uuid.uuid4(),'model':pilot.model,
+            'stages':['laya','llm'] if pilot.config.get('group') else ['llm'],
+            'items':[] if pilot.config.get('group') else [i.pk for i in data['items']]}
         if 'max_tokens' in requested:
             initial['max_tokens'] = requested['max_tokens']
         if requested.get('reasoning'):
             initial['reasoning_tokens'] = requested['reasoning']['max_tokens']
-        model_form = ModelForm(initial=initial)
+        model_form = ModelForm(initial=initial,items=pilot.items.all())
     for item in data['items']:
         item.reference_done = sum(r.decision!='pending' for b,r in latest_reviews(item,'reference').items() if b in BLOCKS)
         item.result_done = sum(r.decision!='pending' for b,r in latest_reviews(item,'result',request.user.pk).items() if b in BLOCKS and b!='articles')
@@ -316,6 +369,11 @@ def detail(request, pk):
     data['published_cards']=ReviewCard.objects.filter(item__pilot=pilot,active=True).count()
     now = timezone.now()
     decorate_progress(pilot,data['items'])
+    if pilot.config.get('group'):
+        decorate_group(pilot,data['items'])
+    selected_ids = model_form['items'].value() if model_form is not None else []
+    data['selected_item_ids'] = [int(v) for v in selected_ids or [] if str(v).isdigit()]
+    data['executions'] = AnalysisPilot.objects.filter(config__group_pilot_id=pilot.pk).select_related('job') if pilot.config.get('group') else []
     data.update(pilot=pilot,error=error,blocks=BLOCKS,model_form=model_form,request_settings=requested,
         selected_stages=processing_stages(pilot.config),processing_label=' + '.join('Laya' if s=='laya' else 'LLM' for s in processing_stages(pilot.config)),
         reasoning_omitted=bool(effective) and 'reasoning' not in effective,
@@ -328,6 +386,7 @@ def decorate_progress(pilot, items):
     stages = processing_stages(pilot.config)
     current = pilot.job.progress.get('pilot_current',{}) if pilot.job.active else {}
     for item in items:
+        item.result_pilot_id,item.result_item_id=item.pilot_id,item.pk
         item.laya_state = ('Requiere atención' if item.laya.get('error') else
             'Reutilizado' if item.metadata.get('laya_reused') else 'Terminado') if item.laya else (
             'Pendiente' if 'laya' in stages else 'Sin resultado guardado · no se ejecutará')
@@ -341,12 +400,39 @@ def decorate_progress(pilot, items):
             if current.get('stage')=='llm': item.llm_state='Procesando ahora'
 
 
+def decorate_group(pilot, items):
+    children = AnalysisPilotItem.objects.filter(pilot__config__group_pilot_id=pilot.pk).select_related('pilot__job').order_by('-pilot_id','-pk')
+    laya, llm, latest = {}, {}, {}
+    for child in children:
+        decorate_progress(child.pilot,[child])
+        latest.setdefault(child.norm_id,child)
+        if 'laya' in processing_stages(child.pilot.config) or child.laya:
+            laya.setdefault(child.norm_id,child)
+        if 'llm' in processing_stages(child.pilot.config):
+            llm.setdefault(child.norm_id,child)
+    for item in items:
+        item.laya_state=item.llm_state='Sin analizar'
+        item.latest_block=latest.get(item.norm_id)
+        if item.norm_id in laya:
+            child=laya[item.norm_id]
+            item.laya,item.laya_state=child.laya,child.laya_state
+            item.processing_now=item.processing_now or child.processing_now
+        if item.norm_id in llm:
+            child=llm[item.norm_id]
+            item.status,item.llm_state=child.status,child.llm_state
+            item.result_pilot_id,item.result_item_id=child.pilot_id,child.pk
+            item.error=child.error
+            item.processing_now=item.processing_now or child.processing_now
+
+
 @staff_required
 @require_GET
 def progress(request, pk):
     pilot = get_object_or_404(AnalysisPilot.objects.select_related('job','crawl_run'),pk=pk)
     items = list(pilot.items.all())
     decorate_progress(pilot,items)
+    if pilot.config.get('group'):
+        decorate_group(pilot,items)
     now = timezone.now()
     context = {'pilot':pilot,'items':items,'selected_stages':processing_stages(pilot.config),
         'processing_label':' + '.join('Laya' if s=='laya' else 'LLM' for s in processing_stages(pilot.config)),

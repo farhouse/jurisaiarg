@@ -412,7 +412,7 @@ class AnalysisPilot(models.Model):
     @property
     def status_label(self):
         return {'preparing':'Preparando muestra', 'reference':'Listo para analizar · referencia opcional',
-                'running':'Analizando', 'waiting':'Requiere atención', 'complete':'Análisis terminado'}.get(self.status, self.status)
+                'selection':'Listo para elegir normas', 'running':'Analizando', 'waiting':'Requiere atención', 'complete':'Análisis terminado'}.get(self.status, self.status)
 
 
 class AnalysisPilotItem(models.Model):

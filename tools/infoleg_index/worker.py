@@ -8,6 +8,7 @@ import subprocess
 import sys
 
 import psycopg
+from psycopg.types.json import Jsonb
 from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 import os
@@ -112,6 +113,8 @@ def process_next(con, dsn):
             status = con.execute("SELECT status FROM crawl_runs WHERE id=%s", (run_id,)).fetchone()[0]
             con.execute("UPDATE crawl_jobs SET status=%s, stage='finished', finished_at=now() WHERE id=%s",
                         ('done' if status == 'ok' else 'partial', job['id']))
+            if job['mode']=='download':
+                create_groups(con,run_id,job['requested_by'],job['start_id'])
             con.commit()
     except BaseException as exc:
         con.rollback()
@@ -126,6 +129,17 @@ def process_next(con, dsn):
     return True
 
 
+def create_groups(con, run_id, username, start_id):
+    from pilot_contract import norm_groups, DEFAULT_MODEL
+    ids = [r[0] for r in con.execute("SELECT DISTINCT norm_id FROM crawl_items WHERE crawl_run_id=%s AND norm_id IS NOT NULL AND status IN ('completa','solo_texto_original','solo_ficha') ORDER BY norm_id",(run_id,))]
+    for submission,config in norm_groups(run_id,ids):
+        con.execute('''INSERT INTO crawl_jobs(submission_id,start_id,end_id,requested_by,mode,crawl_run_id)
+            VALUES(%s,%s,%s,%s,'pilot',%s) ON CONFLICT(submission_id) DO NOTHING''',(submission,start_id,start_id,username,run_id))
+        con.execute('''INSERT INTO analysis_pilots(job_id,crawl_run_id,model,config)
+            SELECT id,%s,%s,%s FROM crawl_jobs WHERE submission_id=%s ON CONFLICT(job_id) DO NOTHING''',
+            (run_id,DEFAULT_MODEL,Jsonb(config),submission))
+
+
 def process_pilot(con, dsn, job):
     from pilot_contract import processing_stages
     # Rama aislada antes de crear/modificar crawl_runs o llamar a parsers con persistencia.
@@ -137,6 +151,8 @@ def process_pilot(con, dsn, job):
         with JobActivity(dsn, job['id'], heartbeat=True) as report:
             selected = processing_stages(config)
             analysis = (['preflight'] if 'llm' in selected else []) + (['laya'] if 'laya' in selected else []) + (['analyze'] if 'llm' in selected else [])
+            if config.get('group'):
+                analysis = []
             stages = ['prepare'] if phase == 'prepare' else analysis
             for stage in stages:
                 con.execute('UPDATE crawl_jobs SET stage=%s WHERE id=%s', ('pilot_' + stage, job['id']))
@@ -160,6 +176,8 @@ def process_pilot(con, dsn, job):
                     stages.extend(analysis)
         if 'llm' not in selected and con.execute('SELECT phase FROM analysis_pilots WHERE id=%s',(pilot_id,)).fetchone()[0]=='analyze':
             con.execute("UPDATE analysis_pilots SET status='complete' WHERE id=%s",(pilot_id,))
+        if config.get('group'):
+            con.execute("UPDATE analysis_pilots SET status='selection' WHERE id=%s",(pilot_id,))
         con.execute("UPDATE crawl_jobs SET progress=progress - 'pilot_current' WHERE id=%s",(job['id'],))
         con.execute("UPDATE crawl_jobs SET status='done',stage='finished',finished_at=now() WHERE id=%s", (job['id'],))
     except BaseException as exc:

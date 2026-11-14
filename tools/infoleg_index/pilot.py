@@ -258,6 +258,8 @@ def prepare(con, pilot_id, report):
     pilot = con.execute('SELECT crawl_run_id,config FROM analysis_pilots WHERE id=%s', (pilot_id,)).fetchone()
     rows = con.execute('''SELECT DISTINCT n.id,n.infoleg_id,n.norm_type,n.number,n.canonical_title,n.summary,n.issuing_body,n.jurisdiction
         FROM norms n JOIN crawl_items ci ON ci.norm_id=n.id WHERE ci.crawl_run_id=%s ORDER BY n.id''', (pilot[0],)).fetchall()
+    if pilot[1].get('group'):
+        rows = [r for r in rows if r[0] in pilot[1]['norm_ids']]
     available = []
     excluded = []
     for row in rows:
@@ -306,6 +308,8 @@ def prepare(con, pilot_id, report):
                 selected.append(values.pop(-1 if len(selected) % 2 else 0))
     if not selected:
         raise PilotError('El lote no contiene textos HTML disponibles para preparar una muestra.')
+    if pilot[1].get('group'):
+        selected = available
     coverage = {'eligible': len(available), 'selected': len(selected), 'excluded': excluded,
         'with_references': sum(bool(s['candidates']) for s in selected),
         'updated': sum(s['source']['version'] == 'actualizada' for s in selected),
@@ -326,7 +330,8 @@ def prepare(con, pilot_id, report):
         report('Congelando fuente de la muestra', document=f"InfoLEG {snapshot['identity']['infoleg_id']}")
     reference_required = pilot[1].get('reference_required', True)
     con.execute('UPDATE analysis_pilots SET status=%s,phase=%s,coverage=%s WHERE id=%s',
-                ('reference' if reference_required else 'running', 'prepare' if reference_required else 'analyze', Jsonb(coverage), pilot_id))
+                ('selection' if pilot[1].get('group') else 'reference' if reference_required else 'running',
+                 'select' if pilot[1].get('group') else 'prepare' if reference_required else 'analyze', Jsonb(coverage), pilot_id))
     con.commit()
 
 

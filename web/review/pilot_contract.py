@@ -1,6 +1,7 @@
 """Contrato compartido por el piloto aislado y su revisión; no modifica normas."""
 import hashlib
 import json
+import uuid
 from urllib.parse import urlsplit
 
 VERSION = 'jurisai-pilot-v1'
@@ -17,6 +18,15 @@ def processing_stages(config):
     if not isinstance(stages, list) or not stages or any(s not in ('laya','llm') for s in stages) or len(set(stages))!=len(stages):
         raise ValueError('Seleccioná Laya, LLM o ambas etapas.')
     return [s for s in ('laya','llm') if s in stages]
+
+
+def norm_groups(run_id, norm_ids):
+    """Grupos estables de hasta 30 normas; prepararlos nunca ejecuta modelos."""
+    ids = sorted(set(norm_ids))
+    for offset in range(0,len(ids),30):
+        selected = ids[offset:offset+30]
+        key = uuid.uuid5(uuid.NAMESPACE_URL,f'jurisai:pilot-group:{run_id}:{fingerprint(selected)}')
+        yield key, {'contract':VERSION,'prompt':PROMPT_VERSION,'group':True,'norm_ids':selected,'reference_required':True}
 
 
 MATTERS = ['Civil y comercial', 'Laboral', 'Familia', 'Penal', 'Administrativo',

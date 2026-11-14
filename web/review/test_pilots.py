@@ -7,7 +7,7 @@ from django.core.cache import cache
 from django.db import connection
 from django.test import TransactionTestCase,Client,SimpleTestCase
 from django.utils import timezone
-from .models import Norm,CrawlRun,CrawlJob,AnalysisPilot,AnalysisPilotItem,AnalysisPilotEvaluation,ReviewCard,CardResponse
+from .models import Norm,CrawlRun,CrawlItem,CrawlJob,AnalysisPilot,AnalysisPilotItem,AnalysisPilotEvaluation,ReviewCard,CardResponse
 from .pilot_contract import empty_result,DEFAULT_MODEL,VERSION,PROMPT_VERSION,request_budget
 from .pilots import model_choices,ModelForm
 
@@ -69,7 +69,7 @@ class ModelCatalogTest(SimpleTestCase):
 
 
 class PilotsTest(TransactionTestCase):
-    tables = [Norm,CrawlRun,CrawlJob,AnalysisPilot,AnalysisPilotItem,AnalysisPilotEvaluation,ReviewCard,CardResponse]
+    tables = [Norm,CrawlRun,CrawlItem,CrawlJob,AnalysisPilot,AnalysisPilotItem,AnalysisPilotEvaluation,ReviewCard,CardResponse]
 
     def setUp(self):
         catalog=patch('review.pilots.model_choices',return_value=([(DEFAULT_MODEL,'Nemotron'),('test/alternate:free','Modelo alternativo')],''))
@@ -251,7 +251,7 @@ class PilotsTest(TransactionTestCase):
         CardResponse.objects.create(card=card,user_id=validator.pk,username=validator.username,action='answer',decision='skip',
             request_id=uuid.uuid4(),created_at=now)
         before_item=list(AnalysisPilotItem.objects.values());before_pilot=list(AnalysisPilot.objects.values())
-        compare={'action':'compare_model','model':original.model,'submission_id':uuid.uuid4(),**LIMITS,'stages':['llm']}
+        compare={'action':'compare_model','model':original.model,'submission_id':uuid.uuid4(),**LIMITS,'stages':['llm'],'items':[item.pk]}
         protected=Client(enforce_csrf_checks=True);protected.force_login(admin)
         self.assertEqual(protected.post(response.url,compare).status_code,403)
         self.client.force_login(validator);self.assertEqual(self.client.post(response.url,compare).status_code,403)
@@ -269,8 +269,8 @@ class PilotsTest(TransactionTestCase):
         self.assertEqual(copied.model,original.model);self.assertEqual(copied.crawl_run_id,run.pk)
         self.assertEqual(copied.phase,'analyze');self.assertEqual(copied.job.status,'queued')
         self.assertEqual(copied.config,{'contract':VERSION,'prompt':PROMPT_VERSION,'reference_required':False,
-            'source_pilot_id':original.pk,'stages':['llm'],'request_settings':request_budget(32768,4096)})
-        self.assertEqual(copied.reference_locked_at,now);self.assertEqual(copied.coverage,original.coverage)
+            'source_pilot_id':original.pk,'source_item_ids':[item.pk],'stages':['llm'],'request_settings':request_budget(32768,4096)})
+        self.assertEqual(copied.reference_locked_at,now);self.assertEqual(copied.coverage,{**original.coverage,'with_references':0,'updated':0})
         fresh=copied.items.get()
         self.assertEqual(fresh.snapshot,snapshot);self.assertEqual(fresh.reference,result)
         self.assertEqual(fresh.split,'holdout');self.assertEqual(fresh.laya,item.laya)
@@ -299,3 +299,43 @@ class PilotsTest(TransactionTestCase):
         self.assertEqual(self.client.post(response.url,{**compare,'max_tokens':65536}).status_code,400)
         self.assertEqual(self.client.post(response.url,{**compare,'stages':['laya']}).status_code,400)
         self.assertEqual(AnalysisPilot.objects.count(),2);self.assertEqual(CrawlJob.objects.count(),2)
+
+    def test_download_groups_are_stable_and_only_selected_norms_are_analyzed(self):
+        admin=User.objects.create_user('group-admin',is_staff=True);self.client.force_login(admin)
+        now=timezone.now()
+        run=CrawlRun.objects.create(requested_ids=list(range(500,531)),started_at=now,finished_at=now,status='ok',processed_count=31)
+        norms=[Norm.objects.create(infoleg_id=i,norm_type='Ley',number=str(i),canonical_title='Norma de prueba',
+            general_status='desconocida',index_status='completa',article_count=1) for i in range(500,531)]
+        CrawlItem.objects.bulk_create([CrawlItem(crawl_run=run,norm=n,infoleg_id=n.infoleg_id,status='completa') for n in norms])
+        response=self.client.post('/gestion/pilotos/',{'action':'groups','run':run.pk})
+        self.assertEqual(response.status_code,302)
+        groups=list(AnalysisPilot.objects.order_by('id'))
+        self.assertEqual([len(g.config['norm_ids']) for g in groups],[30,1])
+        self.assertTrue(all(g.config['group'] and g.job.status=='queued' for g in groups))
+        self.assertEqual(self.client.post('/gestion/pilotos/',{'action':'groups','run':run.pk}).url,response.url)
+        self.assertEqual(AnalysisPilot.objects.count(),2)
+        group=groups[0];group.status='selection';group.phase='select';group.save()
+        group.job.status='done';group.job.save()
+        snapshot={'identity':{'type':'Ley','number':'500','infoleg_id':500,'title':'Prueba'},'source':{'hash':'frozen'},'units':[],'candidates':[]}
+        items=[AnalysisPilotItem.objects.create(pilot=group,norm=n,snapshot=snapshot,reference=empty_result(),split='development',fingerprint=str(n.pk)) for n in norms[:2]]
+        page=self.client.get(response.url)
+        self.assertEqual(page.context['selected_item_ids'],[])
+        data={'action':'compare_model','model':DEFAULT_MODEL,'submission_id':uuid.uuid4(),**LIMITS,'stages':['llm']}
+        self.assertEqual(self.client.post(response.url,data).status_code,400)
+        self.assertEqual(self.client.post(response.url,{**data,'items':[999999]}).status_code,400)
+        created=self.client.post(response.url,{**data,'items':[items[0].pk]})
+        self.assertEqual(created.status_code,302)
+        block=AnalysisPilot.objects.get(config__group_pilot_id=group.pk)
+        self.assertEqual(list(block.items.values_list('norm_id',flat=True)),[norms[0].pk])
+        self.assertEqual(block.coverage['selected'],1)
+        self.assertEqual(self.client.post(response.url,{**data,'items':[items[1].pk]}).status_code,400)
+        self.assertEqual(group.items.count(),2);self.assertEqual(AnalysisPilot.objects.count(),3)
+        fresh=block.items.get();fresh.laya={'revision':'cached','relations':[]};fresh.status='done';fresh.result=empty_result();fresh.save()
+        block.job.status='done';block.job.save()
+        page=self.client.get(response.url)
+        self.assertContains(page,'Ficha lista');self.assertContains(page,f'/normas/{fresh.pk}/')
+        # LLM sola puede usar Laya ya terminado en un bloque del mismo grupo.
+        repeated=self.client.post(response.url,{**data,'submission_id':uuid.uuid4(),'items':[items[0].pk]})
+        self.assertEqual(repeated.status_code,302)
+        latest=AnalysisPilot.objects.order_by('-id').first().items.get()
+        self.assertEqual(latest.laya,fresh.laya);self.assertEqual(latest.metadata['laya_source_item_id'],fresh.pk)

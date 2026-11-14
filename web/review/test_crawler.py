@@ -4,11 +4,11 @@ from django.contrib.auth.models import User
 from django.db import connection
 from django.test import Client, TransactionTestCase
 
-from .models import CrawlJob, CrawlRun, Norm
+from .models import CrawlJob, CrawlRun, Norm,AnalysisPilot
 
 
 class CrawlerAdminTest(TransactionTestCase):
-    tables = [Norm, CrawlRun, CrawlJob]
+    tables = [Norm, CrawlRun, CrawlJob,AnalysisPilot]
 
     @classmethod
     def setUpClass(cls):

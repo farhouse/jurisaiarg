@@ -60,6 +60,13 @@ class WorkerIntegrationTest(unittest.TestCase):
             self.assertEqual(con.execute('SELECT processed_count FROM crawl_runs WHERE id=%s', (run_id,)).fetchone()[0], 2)
             self.assertEqual(con.execute('SELECT count(*) FROM review_tasks WHERE crawl_run_id=%s', (run_id,)).fetchone()[0], 2)
             self.assertEqual(con.execute('SELECT count(*) FROM article_versions').fetchone()[0], 1)
+            group=con.execute('SELECT id,config FROM analysis_pilots WHERE crawl_run_id=%s',(run_id,)).fetchone()
+            self.assertTrue(group[1]['group']);self.assertEqual(len(group[1]['norm_ids']),1)
+            worker.create_groups(con,run_id,'test',201);con.commit()
+            self.assertEqual(con.execute('SELECT count(*) FROM analysis_pilots WHERE crawl_run_id=%s',(run_id,)).fetchone()[0],1)
+            with patch('worker.run_stage',side_effect=AssertionError('preparar no usa modelos')):
+                worker.process_next(con,dsn)
+            self.assertEqual(con.execute('SELECT status,phase FROM analysis_pilots WHERE id=%s',(group[0],)).fetchone(),('selection','select'))
             self.assertTrue(con.execute("SELECT model_result ? 'documents' FROM review_tasks WHERE crawl_run_id=%s ORDER BY id LIMIT 1", (run_id,)).fetchone()[0])
             self.assertEqual(con.execute("SELECT column_default FROM information_schema.columns WHERE table_name='norm_reviews' AND column_name='checks'").fetchone()[0], "'{}'::jsonb")
             self.assertEqual(con.execute("SELECT column_default FROM information_schema.columns WHERE table_name='review_tasks' AND column_name='proposed_correction'").fetchone()[0], "'{}'::jsonb")
@@ -86,6 +93,7 @@ class WorkerIntegrationTest(unittest.TestCase):
             with patch('crawl_infoleg_pg.fetch', side_effect=fetch), patch('crawl_infoleg_pg.time.sleep'):
                 worker.process_next(con, dsn)
             self.assertEqual(con.execute('SELECT status FROM crawl_jobs WHERE id=%s', (second,)).fetchone()[0], 'done')
+            worker.process_next(con,dsn)  # Prepara el nuevo grupo sin ejecutar modelos.
             self.assertEqual(con.execute('SELECT status,notes FROM norm_reviews WHERE task_id=%s', (task,)).fetchone(), ('validada', 'evidencia'))
             failed = enqueue(203, 203)
             con.commit()

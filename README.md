@@ -23,7 +23,7 @@ búsqueda semántica.
 - Responsabilidades de parser, Laya, LLM y validadores:
   [procesamiento híbrido y guía del piloto](docs/procesamiento-hibrido.md).
 
-El piloto aislado se abre desde **Gestión → Pilotos**. Trabaja con un lote ya
+Los análisis se abren desde **Gestión → Pilotos**. La descarga normal prepara grupos de hasta 30 normas sin ejecutar modelos. En cada grupo se eligen normas con casillas y se crean bloques de análisis con Laya, LLM o ambas. Los lotes anteriores pueden preparar los mismos grupos sin duplicarlos. El piloto aislado trabaja con un lote ya
 descargado, congela una muestra y genera fichas para revisar después. La referencia
 manual previa es opcional, para una evaluación avanzada; el validador habitual
 mantiene sus decisiones. Para habilitar OpenRouter, configurar

@@ -6,12 +6,12 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_GET
 
-from .models import CrawlJob, CrawlRun, Norm
+from .models import CrawlJob, CrawlRun, Norm, AnalysisPilot
 from .workflow import staff_required
 
 
 class CrawlForm(forms.Form):
-    mode = forms.ChoiceField(label='Qué querés hacer', choices=[c for c in CrawlJob.MODES if c[0] != 'pilot'], initial='full')
+    mode = forms.ChoiceField(label='Tarea de descarga', choices=[c for c in CrawlJob.MODES if c[0] != 'pilot'], initial='download')
     run = forms.ModelChoiceField(label='Lote descargado', queryset=CrawlRun.objects.none(), required=False)
     start_id = forms.IntegerField(label="Desde el índice", min_value=1, max_value=2147483647, required=False)
     end_id = forms.IntegerField(label="Hasta el índice", min_value=1, max_value=2147483647, required=False)
@@ -91,6 +91,7 @@ def job_detail(request, pk):
     activity_age = (end - job.last_activity_at).total_seconds() if job.last_activity_at else None
     return render(request, "review/crawl_job.html", {
         "job": job, "errors": errors, "processed": job.crawl_run.processed_count if job.crawl_run else 0,
+        "pilot_groups":AnalysisPilot.objects.filter(crawl_run_id=job.crawl_run_id,config__group=True) if job.crawl_run_id else [],
         "elapsed": duration((end - job.started_at).total_seconds()) if job.started_at else None,
         "heartbeat_age": duration(heartbeat_age) if heartbeat_age is not None else None,
         "activity_age": duration(activity_age) if activity_age is not None else None,

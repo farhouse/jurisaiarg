@@ -14,6 +14,20 @@
     group.addEventListener('change', update);
     update();
   });
+  const picks = [...document.querySelectorAll('input[name="items"][form="pilot-execution"]')];
+  const all = document.querySelector('[data-select-all]');
+  if (all && picks.length) {
+    const updateSelection = () => {
+      const selected = picks.filter(el => el.checked).length;
+      all.checked = selected === picks.length;
+      all.indeterminate = selected > 0 && selected < picks.length;
+      document.querySelector('#pilot-selection-count').textContent = selected + ' seleccionadas';
+    };
+    picks.forEach(el => el.addEventListener('change', updateSelection));
+    all.addEventListener('change', () => { picks.forEach(el => { el.checked = all.checked; }); updateSelection(); });
+    document.querySelector('[data-select-none]').addEventListener('click', () => { picks.forEach(el => { el.checked = false; }); updateSelection(); });
+    updateSelection();
+  }
   const live = document.querySelector('#pilot-live');
   if (!live || live.dataset.active !== 'true') return;
   const message = document.querySelector('#pilot-live-status');

@@ -357,13 +357,8 @@ pendiente de análisis por partes. No se recorta ni se acepta un JSON incompleto
 Las solicitudes de generación tienen un tiempo de espera de 360 segundos; un
 fallo de conexión también conserva el trabajo previo.
 
-1. Entrar como administrador en **Gestión → Pilotos**, elegir un lote terminado y
-   las casillas **Laya**, **LLM** o ambas. Para LLM, elegir también el **Modelo de OpenRouter** y los límites de tokens. La elección queda guardada en esa ejecución, aunque
-   después cambie la variable predeterminada del servidor.
-2. Pulsar **Analizar muestra del lote**. El trabajador conserva el HTML y su
-   extracción dentro del piloto y ejecuta únicamente las etapas marcadas. Con ambas, comprueba OpenRouter, ejecuta Laya en un subproceso que termina y luego genera las fichas mediante API. Con solo Laya no necesita clave ni consulta OpenRouter. Con solo LLM no carga ni ejecuta Laya, aunque falten resultados. No vuelve a descargar fuentes
-   ni modifica la extracción jurídica existente. Las entradas demasiado grandes
-   se informan sin truncamiento.
+1. En **Gestión → Descargas**, solicitar los índices. La descarga normal guarda las fuentes y aplica las reglas del parser: identidad, estructura, integridad y referencias. Al terminar encola grupos estables de hasta 30 normas descargadas sin error. Prepararlos congela las fuentes y genera propuestas de reglas; no ejecuta modelos. Los índices con errores se conservan en el informe de descarga. Los recursos sin texto comprobable se informan como exclusiones.
+2. Abrir un **Grupo de normas** desde la descarga o desde **Gestión → Pilotos**. Los lotes anteriores pueden usar **Preparar grupos del lote**, sin duplicar grupos. Marcar las normas en la tabla (ninguna viene elegida en un grupo nuevo), elegir las casillas **Laya**, **LLM** o ambas y pulsar **Analizar normas seleccionadas**. Se crea un bloque separado con esas fuentes congeladas; el resto permanece en el grupo. Para LLM, elegir modelo y límites de tokens. Laya sola no necesita clave ni solicitudes a OpenRouter del trabajador. LLM sola no carga Laya y puede usar sus resultados guardados de bloques anteriores con la misma fuente. El grupo enlaza sus bloques y muestra el último estado y resultado de cada etapa por norma. El flujo anterior que procesa lotes completos y embeddings permanece en las opciones avanzadas de Descargas.
 3. Esperar a que aparezcan fichas disponibles. Se muestran la etapa, última señal,
    actividad y errores. **Normas de la muestra** se actualiza cada tres segundos sin recargar la página: indica Laya pendiente, procesando, terminado o reutilizado, y LLM pendiente, procesando, ficha lista o error. Cada ficha puede abrirse en cuanto termina. Si falla la actualización, conserva el listado y reintenta. Al terminar ofrece actualizar las acciones y el informe. El procesamiento continúa en segundo plano.
 4. Elegir **Revisar ficha**. Leer resumen, materias, conceptos y relaciones junto a
@@ -387,8 +382,8 @@ como respuestas correctas ni permitir cambiarlos durante el análisis.
 **Comparar configuraciones sobre la misma muestra:** cuando el piloto no esté en cola ni
 ejecutándose, abrir **Volver a analizar esta muestra** en su detalle. El formulario
 parte del modelo y los límites guardados, con **solo LLM marcada por defecto**. Marcar las etapas deseadas y, si corresponde, elegir otro modelo o ajustar los tokens,
-y pulsar **Crear piloto con esta configuración**. Se crea una ejecución
-separada con las fuentes congeladas, la misma selección y grupo reservado, y los
+marcar las normas a repetir y pulsar **Analizar normas seleccionadas**. Se crea una ejecución
+separada con las fuentes congeladas, la selección elegida y sus grupos de evaluación reservada, y los
 resultados de Laya ya disponibles. No se descargan otra vez las fuentes ni se
 mezclan salidas de modelos. Se conserva la referencia congelada y su procedencia,
 si existe, pero no se copian evaluaciones humanas, respuestas de tarjetas, errores
@@ -398,7 +393,7 @@ migraciones ni nuevas credenciales.
 
 **Reutilización por etapa:** repetir un piloto copia sus resultados de Laya disponibles. Si solo se marca LLM, esos datos quedan como contexto congelado y Laya no se ejecuta ni se actualiza. Si se marca Laya, se conservan los resultados compatibles y se buscan también en otros pilotos con la misma entrada, revisión del modelo e instrucciones. Los fallos no se consideran resultados reutilizables. Una entrada diferente se procesa de nuevo. El análisis habitual del crawler puede usar otro contexto y otra tarea; no se reutiliza por el mero hecho de pertenecer a la misma ley. Una ejecución de solo Laya deja la ficha LLM como **No solicitada**; se puede continuar desde **Volver a analizar esta muestra** marcando LLM. No cambia los datos oficiales ni las decisiones anteriores.
 
-**Evaluación avanzada:** desplegar la opción al crear el piloto y marcar
+**Evaluación avanzada:** desplegar **Experimento avanzado: muestra automática y referencia previa** en Pilotos y marcar
 **Preparar una referencia manual antes del análisis**. Al terminar la preparación,
 abrir **Preparar una referencia antes de analizar · opcional** en el detalle. Los
 borradores usan reglas, vocabulario y sumario oficial; no son resultados de la LLM.

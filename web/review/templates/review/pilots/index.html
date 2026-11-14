@@ -5,8 +5,15 @@
 <a class="back" href="{% url 'review:management' %}">Volver a Gestión</a>
 <header class="work-heading"><div><h1>Pilotos híbridos</h1><p>Compará parser, Laya y una LLM sobre las fuentes que ya descargaste.</p></div></header>
 <section class="panel">
-  <h2>Analizar un lote descargado</h2>
-  <p>Seleccionaremos hasta 30 normas. Elegí Laya, LLM o ambas etapas. Después revisás los resultados junto a la fuente.</p>
+  <h2>Preparar normas para analizar</h2>
+  <p>Las descargas nuevas crean grupos de hasta 30 normas. Para un lote que ya descargaste, preparalos acá. Después elegís las normas y las etapas de cada bloque.</p>
+  <form method="post">{% csrf_token %}<input type="hidden" name="action" value="groups">{{ group_form.non_field_errors }}
+  <p>{{ group_form.run.label_tag }}{{ group_form.run }}{{ group_form.run.errors }}</p>
+  <button class="button primary">Preparar grupos del lote</button></form>
+  <p class="muted">Preparar grupos no ejecuta Laya ni consume OpenRouter. Repetir esta acción recupera los grupos existentes.</p>
+</section>
+<details class="panel pilot-advanced" {% if form.is_bound %}open{% endif %}><summary>Experimento avanzado: muestra automática y referencia previa</summary>
+  <p>Selecciona hasta 30 normas variadas del lote y ejecuta las etapas elegidas, sin selección manual de normas.</p>
   <form method="post">{% csrf_token %}{{ form.non_field_errors }}{{ form.submission_id }}{{ form.submission_id.errors }}
     <p>{{ form.run.label_tag }}{{ form.run }}{{ form.run.errors }}</p>
     {% include 'review/pilots/execution_fields.html' with execution_form=form %}
@@ -14,10 +21,10 @@
     <p><button class="button primary">Analizar muestra del lote</button></p>
   </form>
   <p class="muted">Las propuestas y decisiones de este experimento tienen su propio historial. El acceso está limitado a administradores.</p>
-</section>
+</details>
 <section class="panel table-panel"><h2>Pilotos preparados</h2><div class="table-scroll"><table>
   <thead><tr><th>Piloto, lote y modelo</th><th>Estado</th><th>Creado</th></tr></thead><tbody>
-  {% for pilot in pilots %}<tr><td><a href="{% url 'review:pilot_detail' pilot.pk %}">Piloto {{ pilot.pk }} · {{ pilot.crawl_run.label }}</a><small class="pilot-model">{{ pilot.model }}</small></td><td>{{ pilot.status_label }}</td><td>{{ pilot.created_at|date:'d/m/Y H:i' }}</td></tr>
+  {% for pilot in pilots %}<tr><td><a href="{% url 'review:pilot_detail' pilot.pk %}">{% if pilot.config.group %}Grupo{% else %}Análisis{% endif %} {{ pilot.pk }} · {{ pilot.crawl_run.label }}</a><small class="pilot-model">{% if pilot.config.group %}{{ pilot.config.norm_ids|length }} normas · elegís cuáles analizar{% else %}{{ pilot.model }}{% endif %}</small></td><td>{{ pilot.status_label }}</td><td>{{ pilot.created_at|date:'d/m/Y H:i' }}</td></tr>
   {% empty %}<tr><td colspan="3">Todavía no hay pilotos. Elegí un lote descargado para comenzar.</td></tr>{% endfor %}
   </tbody></table></div></section>
 {% endblock %}

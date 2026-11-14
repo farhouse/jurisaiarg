@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% load static %}
-{% block title %}Descargar y procesar · JurisAI{% endblock %}
+{% block title %}Descargar fuentes · JurisAI{% endblock %}
 {% block content %}
 <a class="back" href="{% url 'review:management' %}">Volver a Gestión</a>
-<header class="work-heading"><div><h1>Descargar y procesar</h1><p>Primero guardamos las fuentes. Después clasificamos el contenido y preparamos la búsqueda y la revisión.</p></div></header>
+<header class="work-heading"><div><h1>Descargar fuentes</h1><p>Guardamos la información de InfoLEG y extraemos identidad, estructura y referencias mediante reglas. Al terminar, se preparan grupos de normas para que elijas cuáles analizar.</p></div></header>
 <section class="panel crawl-request" aria-labelledby="new-job">
   <h2 id="new-job">Nueva solicitud</h2>
   <form method="post" class="stack-form pipeline-form" id="crawl-request-form">
     {% csrf_token %}{{ form.submission_id }}{{ form.submission_id.errors }}{{ form.non_field_errors }}
-    <label for="{{ form.mode.id_for_label }}">{{ form.mode.label }}</label>{{ form.mode }}{{ form.mode.errors }}
+    <details {% if form.is_bound and form.mode.value != 'download' %}open{% endif %}><summary>Otras tareas: clasificación y búsqueda semántica del flujo anterior</summary><p>La descarga normal permite elegir normas y modelos después, desde Pilotos. Estas opciones procesan el lote completo con el flujo anterior.</p><label for="{{ form.mode.id_for_label }}">{{ form.mode.label }}</label>{{ form.mode }}{{ form.mode.errors }}</details>
     <p class="muted" id="mode-help" aria-live="polite">Completá el rango para una descarga nueva o elegí el lote para procesar una descarga existente.</p>
     <fieldset id="download-fields"><legend>Rango de índices a descargar</legend><p id="range-help">IDs de InfoLEG, no números de ley. Ambos extremos están incluidos; hasta 1.000 índices por lote.</p>
       <div class="crawl-range"><div><label for="{{ form.start_id.id_for_label }}">{{ form.start_id.label }}</label>{{ form.start_id }}{{ form.start_id.errors }}</div><div><label for="{{ form.end_id.id_for_label }}">{{ form.end_id.label }}</label>{{ form.end_id }}{{ form.end_id.errors }}</div></div>

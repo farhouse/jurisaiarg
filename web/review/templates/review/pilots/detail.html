@@ -3,22 +3,24 @@
 {% block extra_head %}<link rel="stylesheet" href="{% static 'review/pilots.css' %}"><script src="{% static 'review/pilot_admin.js' %}" defer></script>{% endblock %}
 {% block content %}
 <a class="back" href="{% url 'review:pilots' %}">Volver a Pilotos</a>
-<header class="work-heading"><div><h1>Piloto {{ pilot.pk }}</h1><p>{{ pilot.crawl_run.label }} · <span id="pilot-status">{{ pilot.status_label }}</span></p></div><a class="button" href="{% url 'review:pilot_export' pilot.pk %}">Exportar muestra y resultados</a></header>
-{% if pilot.config.source_pilot_id %}<p>Misma muestra del <a href="{% url 'review:pilot_detail' pilot.config.source_pilot_id %}">piloto {{ pilot.config.source_pilot_id }}</a>, en otra ejecución.</p>{% endif %}
+<header class="work-heading"><div><h1>{% if pilot.config.group %}Grupo de normas{% else %}Análisis{% endif %} {{ pilot.pk }}</h1><p>{{ pilot.crawl_run.label }} · <span id="pilot-status">{{ pilot.status_label }}</span></p></div><a class="button" href="{% url 'review:pilot_export' pilot.pk %}">Exportar muestra y resultados</a></header>
+{% if pilot.config.source_pilot_id %}<p>Fuentes seleccionadas del <a href="{% url 'review:pilot_detail' pilot.config.source_pilot_id %}">piloto {{ pilot.config.source_pilot_id }}</a>, en otra ejecución.</p>{% endif %}
+{% if pilot.config.group_pilot_id %}<p><a href="{% url 'review:pilot_detail' pilot.config.group_pilot_id %}">Volver al grupo de normas</a>. Este bloque contiene únicamente las normas seleccionadas.</p>{% endif %}
 {% if error %}<div class="review-errors" role="alert"><h2>No se pudo iniciar el análisis</h2><p>{{ error }}</p></div>{% endif %}
 <div id="pilot-live" data-progress-url="{% url 'review:pilot_progress' pilot.pk %}" data-active="{{ pilot.job.active|yesno:'true,false' }}">
 <div id="pilot-progress">{% include 'review/pilots/progress.html' %}</div>
 <p id="pilot-live-status" class="muted" role="status" aria-live="polite"></p>
 </div>
-{% if model_form %}
-<details class="panel pilot-advanced" {% if model_form.is_bound %}open{% endif %}><summary>Volver a analizar esta muestra</summary>
-<p>Elegí qué etapas ejecutar. Para repetir solo OpenRouter, dejá marcada únicamente LLM. Podés cambiar su modelo y límites de tokens. Se crea otro piloto con las mismas fuentes guardadas; este conserva sus resultados y revisiones.</p>
-<form method="post">{% csrf_token %}<input type="hidden" name="action" value="compare_model">{{ model_form.submission_id }}{{ model_form.submission_id.errors }}{{ model_form.non_field_errors }}
-{% include 'review/pilots/execution_fields.html' with execution_form=model_form %}
-<button class="button primary">Crear piloto con esta configuración</button></form></details>
-{% endif %}
 <div id="pilot-sample">{% include 'review/pilots/sample.html' %}</div>
-{% if items %}
+{% if model_form %}
+<details class="panel pilot-advanced" {% if model_form.is_bound or pilot.config.group %}open{% endif %}><summary>{% if pilot.config.group %}Analizar normas seleccionadas{% else %}Volver a analizar esta muestra{% endif %}</summary>
+<p>Marcá las normas en la tabla y elegí qué etapas ejecutar. Se crea un bloque separado con esas fuentes guardadas; los resultados y revisiones anteriores se conservan.</p>
+<form method="post" id="pilot-execution">{% csrf_token %}<input type="hidden" name="action" value="compare_model">{{ model_form.submission_id }}{{ model_form.submission_id.errors }}{{ model_form.non_field_errors }}
+{% include 'review/pilots/execution_fields.html' with execution_form=model_form %}
+<button class="button primary">Analizar normas seleccionadas</button></form></details>
+{% endif %}
+{% if executions %}<section class="panel"><h2>Bloques de este grupo</h2><ul>{% for execution in executions %}<li><a href="{% url 'review:pilot_detail' execution.pk %}">Análisis {{ execution.pk }}</a> · {{ execution.coverage.selected }} normas · {{ execution.status_label }}</li>{% endfor %}</ul></section>{% endif %}
+{% if items and not pilot.config.group %}
 <section class="panel"><h2>Tarjetas para colaboradores</h2>
 <p>{{ published_cards }} tarjetas habilitadas. Cada respuesta evalúa un tema o un resumen; conserva su propio historial y no aprueba la norma completa.</p>
 <form method="post" action="{% url 'review:card_publication' pilot.pk %}">{% csrf_token %}<button class="button primary" name="action" value="publish" {% if not completed %}disabled{% endif %}>{% if pilot.config.cards_enabled %}Actualizar tarjetas disponibles{% else %}Habilitar tarjetas disponibles{% endif %}</button>{% if pilot.config.cards_enabled %} <button class="button" name="action" value="withdraw">Retirar muestra</button>{% endif %}</form>

@@ -8,7 +8,7 @@
   const help = document.getElementById('mode-help');
   const copy = {
     full: ['Descarga el rango indicado, lo clasifica con Laya y prepara la búsqueda semántica y la revisión.', 'Encolar descarga y procesamiento'],
-    download: ['Guarda las fuentes y extrae el texto y las relaciones con el parser. Podés clasificar el lote después.', 'Encolar descarga'],
+    download: ['Descarga las fuentes, aplica las reglas del parser y prepara grupos de hasta 30 normas. Elegís qué analizar con Laya o LLM desde Pilotos.', 'Encolar descarga y preparar grupos'],
     process: ['Clasifica con Laya el lote que elijas y prepara la búsqueda semántica, usando los textos ya descargados.', 'Encolar procesamiento del lote'],
   };
 
