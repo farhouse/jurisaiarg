@@ -11,7 +11,7 @@ from .models import Norm,CrawlRun,CrawlJob,AnalysisPilot,AnalysisPilotItem,Analy
 from .pilot_contract import empty_result,DEFAULT_MODEL,VERSION,PROMPT_VERSION,request_budget
 from .pilots import model_choices,ModelForm
 
-LIMITS={'max_tokens':32768,'reasoning_tokens':4096}
+LIMITS={'max_tokens':32768,'reasoning_tokens':4096,'stages':['laya','llm']}
 
 
 class ModelCatalogTest(SimpleTestCase):
@@ -30,6 +30,17 @@ class ModelCatalogTest(SimpleTestCase):
                 with self.subTest(changes=changes):
                     form=ModelForm({**valid,**changes});self.assertFalse(form.is_valid())
                     self.assertTrue('max_tokens' in form.errors or 'reasoning_tokens' in form.errors)
+
+    def test_stage_checkboxes_require_a_choice_and_laya_needs_no_api_configuration(self):
+        data={'submission_id':uuid.uuid4(),'stages':['laya']}
+        with patch('review.pilots.model_choices',side_effect=AssertionError('Laya no consulta OpenRouter')):
+            form=ModelForm(data)
+            self.assertTrue(form.is_valid(),form.errors)
+            self.assertEqual(form.cleaned_data['stages'],['laya'])
+        with patch('review.pilots.model_choices',return_value=([(DEFAULT_MODEL,'Nemotron')],'')):
+            for stages in ([],['invalid']):
+                form=ModelForm({**LIMITS,'model':DEFAULT_MODEL,'submission_id':uuid.uuid4(),'stages':stages})
+                self.assertFalse(form.is_valid());self.assertIn('stages',form.errors)
 
     def test_public_catalog_only_offers_free_structured_models_and_is_cached(self):
         good={'id':'test/compatible:free','name':'Compatible','pricing':{'prompt':'0','completion':'0'},
@@ -211,7 +222,7 @@ class PilotsTest(TransactionTestCase):
         norm=Norm.objects.create(infoleg_id=1,norm_type='Ley',number='23600',canonical_title='EXPROPIACIONES',
             general_status='desconocida',index_status='solo_texto_original',article_count=1)
         run=CrawlRun.objects.create(requested_ids=[1],started_at=now,finished_at=now,status='ok',processed_count=1)
-        data={'run':run.pk,'model':'test/alternate:free','submission_id':uuid.uuid4(),'max_tokens':49152,'reasoning_tokens':2048}
+        data={'run':run.pk,'model':'test/alternate:free','submission_id':uuid.uuid4(),'max_tokens':49152,'reasoning_tokens':2048,'stages':['laya','llm']}
         for invalid in ('paid/model','unknown/model:free'):
             self.assertEqual(self.client.post('/gestion/pilotos/',{**data,'model':invalid}).status_code,400)
         self.assertEqual(AnalysisPilot.objects.count(),0)
@@ -240,7 +251,7 @@ class PilotsTest(TransactionTestCase):
         CardResponse.objects.create(card=card,user_id=validator.pk,username=validator.username,action='answer',decision='skip',
             request_id=uuid.uuid4(),created_at=now)
         before_item=list(AnalysisPilotItem.objects.values());before_pilot=list(AnalysisPilot.objects.values())
-        compare={'action':'compare_model','model':original.model,'submission_id':uuid.uuid4(),**LIMITS}
+        compare={'action':'compare_model','model':original.model,'submission_id':uuid.uuid4(),**LIMITS,'stages':['llm']}
         protected=Client(enforce_csrf_checks=True);protected.force_login(admin)
         self.assertEqual(protected.post(response.url,compare).status_code,403)
         self.client.force_login(validator);self.assertEqual(self.client.post(response.url,compare).status_code,403)
@@ -258,18 +269,33 @@ class PilotsTest(TransactionTestCase):
         self.assertEqual(copied.model,original.model);self.assertEqual(copied.crawl_run_id,run.pk)
         self.assertEqual(copied.phase,'analyze');self.assertEqual(copied.job.status,'queued')
         self.assertEqual(copied.config,{'contract':VERSION,'prompt':PROMPT_VERSION,'reference_required':False,
-            'source_pilot_id':original.pk,'request_settings':request_budget(32768,4096)})
+            'source_pilot_id':original.pk,'stages':['llm'],'request_settings':request_budget(32768,4096)})
         self.assertEqual(copied.reference_locked_at,now);self.assertEqual(copied.coverage,original.coverage)
         fresh=copied.items.get()
         self.assertEqual(fresh.snapshot,snapshot);self.assertEqual(fresh.reference,result)
         self.assertEqual(fresh.split,'holdout');self.assertEqual(fresh.laya,item.laya)
         self.assertEqual(fresh.fingerprint,item.fingerprint);self.assertEqual(fresh.status,'pending')
         self.assertFalse(fresh.result);self.assertFalse(fresh.error)
-        self.assertEqual(fresh.metadata,{'reference_authors':{'summary':'model-admin'},'reference_decisions':{'summary':'confirmed'},'search_queries':['expropiación']})
+        self.assertEqual(fresh.metadata,{'reference_authors':{'summary':'model-admin'},'reference_decisions':{'summary':'confirmed'},'search_queries':['expropiación'],'laya_reused':True,'laya_source_item_id':item.pk})
         self.assertFalse(fresh.evaluations.exists());self.assertFalse(fresh.cards.exists())
         self.assertEqual(list(AnalysisPilotItem.objects.filter(pk=item.pk).values()),before_item)
         self.assertEqual(list(AnalysisPilot.objects.filter(pk=original.pk).values()),before_pilot)
         self.assertEqual(CardResponse.objects.count(),1);self.assertEqual(AnalysisPilotEvaluation.objects.count(),1)
+        progress_url=f'/gestion/pilotos/{copied.pk}/avance/'
+        copied.job.status='running';copied.job.progress={'pilot_current':{'item_id':fresh.pk,'stage':'llm'}}
+        copied.job.save()
+        live=self.client.get(progress_url)
+        self.assertEqual(live.status_code,200);self.assertEqual(live['Cache-Control'],'no-store')
+        self.assertTrue(live.json()['active'])
+        self.assertIn('Procesando ahora',live.json()['sample_html']);self.assertIn('Reutilizado',live.json()['sample_html'])
+        self.assertIn('LLM',live.json()['progress_html'])
+        fresh.status='done';fresh.result=result;fresh.save()
+        copied.job.status='done';copied.job.save()
+        live=self.client.get(progress_url).json()
+        self.assertFalse(live['active']);self.assertIn('Ficha lista',live['sample_html'])
+        self.client.force_login(validator);self.assertEqual(self.client.get(progress_url).status_code,403)
+        self.client.force_login(admin)
         self.assertEqual(self.client.post(response.url,compare).url,created.url)
         self.assertEqual(self.client.post(response.url,{**compare,'max_tokens':65536}).status_code,400)
+        self.assertEqual(self.client.post(response.url,{**compare,'stages':['laya']}).status_code,400)
         self.assertEqual(AnalysisPilot.objects.count(),2);self.assertEqual(CrawlJob.objects.count(),2)

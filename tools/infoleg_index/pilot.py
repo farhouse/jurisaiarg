@@ -17,7 +17,7 @@ from psycopg.types.json import Jsonb
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'web' / 'review') if len(Path(__file__).resolve().parents) > 2 else '/app')
 from pilot_contract import (VERSION, PROMPT_VERSION, DEFAULT_MODEL, SCHEMA, INSTRUCTIONS,
                             fingerprint, empty_result, validate_result, analysis_resources,
-                            request_budget, DEFAULT_MAX_TOKENS, DEFAULT_REASONING_TOKENS)
+                            request_budget, DEFAULT_MAX_TOKENS, DEFAULT_REASONING_TOKENS, processing_stages)
 from parser import parse_articles, parse_card, PARSER_VERSION
 from references import extract_references
 from legal_parser import extract_legal_changes, normalize_norm_number, NOTE_BLOCK
@@ -261,6 +261,7 @@ def prepare(con, pilot_id, report):
     available = []
     excluded = []
     for row in rows:
+        report('Preparando fuente guardada',document=f'InfoLEG {row[1]}')
         source = con.execute('''SELECT id,document_kind,url,retrieved_at,raw_content FROM norm_sources
             WHERE norm_id=%s AND crawl_run_id=%s AND document_kind IN ('texto_original','texto_actualizado')
             AND raw_content IS NOT NULL AND http_status=200
@@ -321,6 +322,7 @@ def prepare(con, pilot_id, report):
             con.execute('''UPDATE analysis_pilot_items SET metadata=metadata || %s WHERE pilot_id=%s AND norm_id=%s''',
                 (Jsonb({'search_queries':['Expropiación de un inmueble para dependencias judiciales',
                     'Cómo se financia la adquisición del inmueble destinado al Poder Judicial']}),pilot_id,snapshot['identity']['norm_id']))
+        con.commit()
         report('Congelando fuente de la muestra', document=f"InfoLEG {snapshot['identity']['infoleg_id']}")
     reference_required = pilot[1].get('reference_required', True)
     con.execute('UPDATE analysis_pilots SET status=%s,phase=%s,coverage=%s WHERE id=%s',
@@ -330,12 +332,29 @@ def prepare(con, pilot_id, report):
 
 def laya_stage(con, pilot_id, report):
     from topics import classify_norm_topics, VERSION as TOPICS_VERSION
-    from try_laya import classify, MODEL_REVISION
-    rows = con.execute('SELECT id,snapshot,laya FROM analysis_pilot_items WHERE pilot_id=%s ORDER BY id', (pilot_id,)).fetchall()
+    from try_laya import classify, MODEL_REVISION, TRIAGE_VERSION, QUESTIONS
+    rows = con.execute('SELECT id,snapshot,laya,fingerprint FROM analysis_pilot_items WHERE pilot_id=%s ORDER BY id', (pilot_id,)).fetchall()
     router = None
-    for pk, snapshot, cached in rows:
-        if cached.get('revision') == MODEL_REVISION and cached.get('topics_version') == TOPICS_VERSION:
+    for pk, snapshot, cached, source_key in rows:
+        cache_key = fingerprint([snapshot['identity']['title'],snapshot['units'],snapshot['candidates'],
+            MODEL_REVISION,TOPICS_VERSION,TRIAGE_VERSION,QUESTIONS])
+        if (not cached.get('error') and cached.get('revision') == MODEL_REVISION and cached.get('topics_version') == TOPICS_VERSION
+                and cached.get('cache_key',cache_key)==cache_key):
+            report('Laya ya terminado; resultado conservado', document=f"InfoLEG {snapshot['identity']['infoleg_id']}")
             continue
+        previous = con.execute('''SELECT id,laya FROM analysis_pilot_items WHERE id<>%s AND NOT laya ? 'error'
+            AND (laya->>'cache_key'=%s OR (fingerprint=%s AND snapshot=%s AND NOT laya ? 'cache_key'
+                AND laya->>'revision'=%s AND laya->>'topics_version'=%s)) ORDER BY id LIMIT 1''',
+            (pk,cache_key,source_key,Jsonb(snapshot),MODEL_REVISION,TOPICS_VERSION)).fetchone()
+        if previous:
+            con.execute('UPDATE analysis_pilot_items SET laya=%s,metadata=metadata || %s WHERE id=%s',
+                (Jsonb(previous[1]),Jsonb({'laya_reused':True,'laya_source_item_id':previous[0]}),pk))
+            con.commit()
+            report('Reutilizando Laya de otra ejecución compatible',document=f"InfoLEG {snapshot['identity']['infoleg_id']}")
+            continue
+        con.execute("UPDATE crawl_jobs SET progress=progress || %s WHERE id=(SELECT job_id FROM analysis_pilots WHERE id=%s)",
+            (Jsonb({'pilot_current':{'item_id':pk,'stage':'laya'}}),pilot_id))
+        con.commit()
         report('Evaluando Laya por separado', document=f"InfoLEG {snapshot['identity']['infoleg_id']}")
         try:
             if router is None:
@@ -358,11 +377,13 @@ def laya_stage(con, pilot_id, report):
                 [{'label': u['label'], 'text': u['text']} for u in units],
                 on_fragment=lambda label, fragment: report('Probando materias con Laya; resultado experimental',
                     document=f"InfoLEG {snapshot['identity']['infoleg_id']} · {label}", fragment=fragment))
-            result = {'revision': MODEL_REVISION, 'topics_version': TOPICS_VERSION, 'relations': relations, 'topics': topics}
+            result = {'revision': MODEL_REVISION, 'topics_version': TOPICS_VERSION, 'cache_key':cache_key, 'relations': relations, 'topics': topics}
         except Exception:
             result = {'error': 'Laya no pudo completar este documento. Se conserva el fallo; la LLM puede analizar la fuente completa.'}
-        con.execute('UPDATE analysis_pilot_items SET laya=%s WHERE id=%s', (Jsonb(result), pk))
+        con.execute("UPDATE analysis_pilot_items SET laya=%s,metadata=metadata - 'laya_reused' - 'laya_source_item_id' WHERE id=%s", (Jsonb(result), pk))
         con.commit()
+    con.execute("UPDATE crawl_jobs SET progress=progress - 'pilot_current' WHERE id=(SELECT job_id FROM analysis_pilots WHERE id=%s)",(pilot_id,))
+    con.commit()
     del router
     gc.collect()
 
@@ -375,6 +396,9 @@ def analyze(con, pilot_id, job_id, report):
     for done, (pk, snapshot, laya, status, key) in enumerate(rows, 1):
         if status == 'done':
             continue
+        con.execute('UPDATE crawl_jobs SET progress=progress || %s WHERE id=%s',
+            (Jsonb({'pilot_current':{'item_id':pk,'stage':'llm'}}),job_id))
+        con.commit()
         cache_key = fingerprint([key,model,VERSION,PROMPT_VERSION,settings,laya.get('revision'),analysis_resources(snapshot.get('resources_not_checked',[])),
             [{k:v for k,v in r.items() if k!='seconds'} for r in laya.get('relations',[])]])
         previous = con.execute('''SELECT result,metadata FROM analysis_pilot_items WHERE status='done'
@@ -383,7 +407,7 @@ def analyze(con, pilot_id, job_id, report):
         try:
             if previous:
                 result, metadata = previous
-                metadata = {**{k:v for k,v in metadata.items() if not k.startswith('reference_') and k not in ('search_queries','attempts')}, 'reused': True}
+                metadata = {**{k:v for k,v in metadata.items() if not k.startswith(('reference_','laya_')) and k not in ('search_queries','attempts')}, 'reused': True}
             else:
                 result, metadata = infer(snapshot, laya, model, capacity,settings)
                 metadata.update(cache_key=cache_key, contract=VERSION, prompt=PROMPT_VERSION, reused=False)
@@ -400,6 +424,7 @@ def analyze(con, pilot_id, job_id, report):
         con.execute("UPDATE crawl_jobs SET progress=progress || %s WHERE id=%s",
                     (Jsonb({'pilot': {'done': done, 'total': len(rows)}}), job_id))
         con.commit()
+    con.execute("UPDATE crawl_jobs SET progress=progress - 'pilot_current' WHERE id=%s",(job_id,))
     con.execute("UPDATE analysis_pilots SET status='complete' WHERE id=%s", (pilot_id,))
     con.commit()
 
@@ -423,6 +448,9 @@ def main():
                 con.commit()
             elif stage == 'laya':
                 laya_stage(con, pilot_id, report)
+                config = con.execute('SELECT config FROM analysis_pilots WHERE id=%s',(pilot_id,)).fetchone()[0]
+                if 'llm' not in processing_stages(config) and con.execute("SELECT 1 FROM analysis_pilot_items WHERE pilot_id=%s AND laya ? 'error' LIMIT 1",(pilot_id,)).fetchone():
+                    raise PilotError('Laya no completó algunas normas. Los resultados terminados se conservan; retomá para reintentar los fallos.')
             elif stage == 'analyze':
                 analyze(con, pilot_id, job_id, report)
             else:

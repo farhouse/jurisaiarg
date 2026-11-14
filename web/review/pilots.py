@@ -13,6 +13,7 @@ from django.db.models import Value,TextField
 from django.db.models.functions import Replace
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -20,7 +21,7 @@ from django.views.decorators.http import require_http_methods, require_GET
 
 from .models import AnalysisPilot, AnalysisPilotItem, AnalysisPilotEvaluation, CrawlJob, CrawlRun, Norm, ReviewCard
 from .pilot_contract import (BLOCKS, DEFAULT_MODEL, VERSION, PROMPT_VERSION, analysis_resources,
-    request_budget, DEFAULT_MAX_TOKENS, DEFAULT_REASONING_TOKENS)
+    request_budget, DEFAULT_MAX_TOKENS, DEFAULT_REASONING_TOKENS, STAGE_CHOICES, processing_stages)
 from .pilot_forms import BlockForm
 from .workflow import staff_required
 
@@ -58,6 +59,9 @@ def model_choices():
 
 
 class ModelForm(forms.Form):
+    stages = forms.MultipleChoiceField(label='Etapas a ejecutar',choices=STAGE_CHOICES,initial=['laya','llm'],
+        widget=forms.CheckboxSelectMultiple,error_messages={'required':'Seleccioná al menos una etapa.'},
+        help_text='La muestra usa las fuentes guardadas. No vuelve a descargar ni genera embeddings.')
     model = forms.ChoiceField(label='Modelo de OpenRouter',choices=[],
         help_text='Modelos gratuitos que anuncian salida estructurada. El trabajador comprueba la disponibilidad antes de analizar.')
     max_tokens = forms.IntegerField(label='Límite total de salida (tokens)',min_value=2048,max_value=131072,
@@ -68,13 +72,28 @@ class ModelForm(forms.Form):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        choices,self.catalog_warning = model_choices()
+        selected = self.data.getlist('stages') if hasattr(self.data,'getlist') else self.data.get('stages',[])
+        laya_only = self.is_bound and selected==['laya']
+        choices,self.catalog_warning = ([(DEFAULT_MODEL,DEFAULT_MODEL+' · comprobar al ejecutar')], '') if laya_only else model_choices()
         self.fields['model'].choices = [('', 'Elegí un modelo')]+choices
         self.fields['max_tokens'].initial = os.environ.get('JURISAI_PILOT_MAX_TOKENS',DEFAULT_MAX_TOKENS)
         self.fields['reasoning_tokens'].initial = os.environ.get('JURISAI_PILOT_REASONING_TOKENS',DEFAULT_REASONING_TOKENS)
+        if laya_only:
+            for name in ('model','max_tokens','reasoning_tokens'):
+                self.fields[name].required = False
+                self.fields[name].disabled = True
+            self.fields['model'].initial = DEFAULT_MODEL
+            self.fields['max_tokens'].initial = DEFAULT_MAX_TOKENS
+            self.fields['reasoning_tokens'].initial = DEFAULT_REASONING_TOKENS
 
     def clean(self):
         data = super().clean()
+        if data.get('stages'):
+            data['stages'] = processing_stages({'stages':data['stages']})
+        if data.get('stages')==['laya']:
+            data['model'] = DEFAULT_MODEL
+            data['request_settings'] = request_budget(DEFAULT_MAX_TOKENS,DEFAULT_REASONING_TOKENS)
+            return data
         if 'max_tokens' in data and 'reasoning_tokens' in data:
             try:
                 data['request_settings'] = request_budget(data['max_tokens'],data['reasoning_tokens'])
@@ -118,9 +137,10 @@ def index(request):
                 pilot, _ = AnalysisPilot.objects.get_or_create(job=job, defaults={'crawl_run':run,
                     'model':form.cleaned_data['model'],'created_at':timezone.now(),
                     'config':{'contract':VERSION,'prompt':PROMPT_VERSION,'reference_required':form.cleaned_data['reference_required'],
-                        'request_settings':form.cleaned_data['request_settings']}})
+                        'stages':form.cleaned_data['stages'],'request_settings':form.cleaned_data['request_settings']}})
                 if (pilot.model!=form.cleaned_data['model'] or pilot.crawl_run_id!=run.pk or pilot.config.get('source_pilot_id')
-                        or pilot.config.get('request_settings')!=form.cleaned_data['request_settings']):
+                        or pilot.config.get('request_settings')!=form.cleaned_data['request_settings']
+                        or processing_stages(pilot.config)!=form.cleaned_data['stages']):
                     form.add_error(None,'Esta solicitud ya creó otro piloto. Recargá antes de cambiar el modelo, los límites o el lote.')
                 else:
                     return redirect('review:pilot_detail', pk=pilot.pk)
@@ -220,19 +240,22 @@ def detail(request, pk):
                         error = 'Esta solicitud pertenece a otro trabajo. Recargá antes de continuar.'
                     else:
                         config = {k:pilot.config[k] for k in ('contract','prompt') if k in pilot.config}
-                        config.update(reference_required=False,source_pilot_id=pilot.pk,request_settings=model_form.cleaned_data['request_settings'])
+                        config.update(reference_required=False,source_pilot_id=pilot.pk,
+                            stages=model_form.cleaned_data['stages'],request_settings=model_form.cleaned_data['request_settings'])
                         new_pilot,created = AnalysisPilot.objects.get_or_create(job=new_job,defaults={
                             'crawl_run':pilot.crawl_run,'model':model_form.cleaned_data['model'],'created_at':timezone.now(),
                             'status':'running','phase':'analyze','config':config,'coverage':pilot.coverage,
                             'reference_locked_at':pilot.reference_locked_at})
                         if (new_pilot.config.get('source_pilot_id')!=pilot.pk or new_pilot.model!=model_form.cleaned_data['model']
-                                or new_pilot.config.get('request_settings')!=model_form.cleaned_data['request_settings']):
+                                or new_pilot.config.get('request_settings')!=model_form.cleaned_data['request_settings']
+                                or processing_stages(new_pilot.config)!=model_form.cleaned_data['stages']):
                             error = 'Esta solicitud ya creó otro piloto. Recargá antes de cambiar el modelo o los límites.'
                         else:
                             if created:
                                 AnalysisPilotItem.objects.bulk_create([AnalysisPilotItem(pilot=new_pilot,norm_id=item.norm_id,
                                     snapshot=item.snapshot,reference=item.reference,split=item.split,laya=item.laya,fingerprint=item.fingerprint,
-                                    metadata={k:v for k,v in item.metadata.items() if k in ('reference_authors','reference_decisions','search_queries')})
+                                    metadata={**{k:v for k,v in item.metadata.items() if k in ('reference_authors','reference_decisions','search_queries')},
+                                        **({'laya_reused':True,'laya_source_item_id':item.pk} if item.laya and not item.laya.get('error') else {})})
                                     for item in pilot.items.all()])
                             return redirect('review:pilot_detail',pk=new_pilot.pk)
                 error = error or 'No se creó otro piloto. Revisá el modelo y los límites indicados abajo.'
@@ -278,7 +301,7 @@ def detail(request, pk):
     effective = pilot.config.get('endpoint',{}).get('request_settings',{})
     requested = pilot.config.get('request_settings') or effective
     if model_form is None and not pilot.job.active and data['items']:
-        initial = {'submission_id':uuid.uuid4(),'model':pilot.model}
+        initial = {'submission_id':uuid.uuid4(),'model':pilot.model,'stages':['llm']}
         if 'max_tokens' in requested:
             initial['max_tokens'] = requested['max_tokens']
         if requested.get('reasoning'):
@@ -292,11 +315,54 @@ def detail(request, pk):
             _,item.card_exclusions=card_proposals(item,request.user.pk)
     data['published_cards']=ReviewCard.objects.filter(item__pilot=pilot,active=True).count()
     now = timezone.now()
+    decorate_progress(pilot,data['items'])
     data.update(pilot=pilot,error=error,blocks=BLOCKS,model_form=model_form,request_settings=requested,
+        selected_stages=processing_stages(pilot.config),processing_label=' + '.join('Laya' if s=='laya' else 'LLM' for s in processing_stages(pilot.config)),
         reasoning_omitted=bool(effective) and 'reasoning' not in effective,
         heartbeat_age=int((now-pilot.job.heartbeat_at).total_seconds()) if pilot.job.heartbeat_at else None,
         activity_age=int((now-pilot.job.last_activity_at).total_seconds()) if pilot.job.last_activity_at else None)
     return render(request,'review/pilots/detail.html',data,status=400 if error else 200)
+
+
+def decorate_progress(pilot, items):
+    stages = processing_stages(pilot.config)
+    current = pilot.job.progress.get('pilot_current',{}) if pilot.job.active else {}
+    for item in items:
+        item.laya_state = ('Requiere atención' if item.laya.get('error') else
+            'Reutilizado' if item.metadata.get('laya_reused') else 'Terminado') if item.laya else (
+            'Pendiente' if 'laya' in stages else 'Sin resultado guardado · no se ejecutará')
+        if item.laya.get('error') and 'laya' not in stages:
+            item.laya_state = 'Error guardado · Laya no solicitada'
+        item.llm_state = ('Reutilizada' if item.metadata.get('reused') else 'Ficha lista') if item.status=='done' else (
+            'Requiere atención' if item.error else 'Pendiente' if 'llm' in stages else 'No solicitada')
+        item.processing_now = current.get('item_id')==item.pk
+        if item.processing_now:
+            if current.get('stage')=='laya': item.laya_state='Procesando ahora'
+            if current.get('stage')=='llm': item.llm_state='Procesando ahora'
+
+
+@staff_required
+@require_GET
+def progress(request, pk):
+    pilot = get_object_or_404(AnalysisPilot.objects.select_related('job','crawl_run'),pk=pk)
+    items = list(pilot.items.all())
+    decorate_progress(pilot,items)
+    now = timezone.now()
+    context = {'pilot':pilot,'items':items,'selected_stages':processing_stages(pilot.config),
+        'processing_label':' + '.join('Laya' if s=='laya' else 'LLM' for s in processing_stages(pilot.config)),
+        'request_settings':pilot.config.get('request_settings',{}),'live_refresh':True,
+        'heartbeat_age':int((now-pilot.job.heartbeat_at).total_seconds()) if pilot.job.heartbeat_at else None,
+        'activity_age':int((now-pilot.job.last_activity_at).total_seconds()) if pilot.job.last_activity_at else None}
+    for item in items:
+        item.reference_done = sum(r.decision!='pending' for b,r in latest_reviews(item,'reference').items() if b in BLOCKS)
+        item.result_done = sum(r.decision!='pending' for b,r in latest_reviews(item,'result',request.user.pk).items() if b in BLOCKS and b!='articles')
+    effective = pilot.config.get('endpoint',{}).get('request_settings',{})
+    context['reasoning_omitted'] = bool(effective) and 'reasoning' not in effective
+    response = JsonResponse({'active':pilot.job.active,'status':pilot.status_label,
+        'progress_html':render_to_string('review/pilots/progress.html',context,request=request),
+        'sample_html':render_to_string('review/pilots/sample.html',context,request=request)})
+    response['Cache-Control']='no-store'
+    return response
 
 
 def display_facts(block, value, snapshot):

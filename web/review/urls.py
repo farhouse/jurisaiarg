@@ -23,6 +23,7 @@ urlpatterns = [
     path('gestion/tarjetas/',cards.report,name='card_report'),
     path('gestion/pilotos/', pilots.index, name='pilots'),
     path('gestion/pilotos/<int:pk>/', pilots.detail, name='pilot_detail'),
+    path('gestion/pilotos/<int:pk>/avance/', pilots.progress, name='pilot_progress'),
     path('gestion/pilotos/<int:pk>/tarjetas/',cards.publication,name='card_publication'),
     path('gestion/pilotos/<int:pk>/exportar/', pilots.export, name='pilot_export'),
     path('gestion/pilotos/<int:pk>/normas/<int:item_id>/', pilots.item_detail, name='pilot_item'),

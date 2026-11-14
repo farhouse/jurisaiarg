@@ -1,0 +1,13 @@
+<section class="panel table-panel"><h2>Normas de la muestra</h2>
+{% if items %}
+<p>{{ items|length }} normas guardadas{% if pilot.coverage.eligible %} de {{ pilot.coverage.eligible }} elegibles · {{ pilot.coverage.with_references }} con referencias · {{ pilot.coverage.updated }} con texto actualizado{% endif %}.</p>
+<div class="table-scroll"><table><thead><tr><th>Norma</th><th>Laya</th><th>LLM</th><th>Tu revisión</th></tr></thead><tbody>
+{% for item in items %}<tr data-item-id="{{ item.pk }}" {% if item.processing_now %}class="pilot-processing" aria-current="true"{% endif %}>
+<td>{{ item.snapshot.identity.type }} {{ item.snapshot.identity.number }} · InfoLEG {{ item.snapshot.identity.infoleg_id }}<br><small>{{ item.snapshot.identity.title|truncatechars:70 }}</small></td>
+<td>{{ item.laya_state }}{% if item.laya.error %}<br><small>{{ item.laya.error }}</small>{% elif item.laya %}<details data-details-key="laya-{{ item.pk }}"><summary>Ver resultado de Laya</summary><p>Materias experimentales: {% for matter in item.laya.topics.matters %}{{ matter.label }}{% if not forloop.last %}, {% endif %}{% empty %}sin propuesta{% endfor %}.</p>{% for relation in item.laya.relations %}<p>{{ relation.candidate.target_type }} {{ relation.candidate.target_number }}: {{ relation.prediction }}{% if not relation.complete %} · entrada incompleta o no comprobada{% endif %}.</p>{% empty %}<p>Sin pasajes de relaciones para contrastar.</p>{% endfor %}<small>Revisión del modelo: {{ item.laya.revision }}</small></details>{% endif %}</td>
+<td>{% if item.status == 'done' %}<a href="{% url 'review:pilot_item' pilot.pk item.pk %}">{{ item.llm_state }} · revisar</a>{% else %}{{ item.llm_state }}{% if item.error %}<br><small>{{ item.error }}</small>{% endif %}{% endif %}</td>
+<td>{% if item.result_done == 4 %}Revisada{% elif item.result_done %}En curso · {{ item.result_done }}/4 bloques{% elif 'llm' in selected_stages %}Sin revisar{% else %}No solicitada{% endif %}</td>
+</tr>{% endfor %}
+</tbody></table></div>
+{% else %}<p>El trabajador está preparando la muestra. Las normas aparecerán aquí a medida que se guarden.</p>{% endif %}
+</section>

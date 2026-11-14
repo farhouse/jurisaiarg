@@ -1,0 +1,24 @@
+<section class="panel">
+  <h2>{% if pilot.status == 'reference' %}Muestra lista para analizar{% else %}{{ pilot.job.get_stage_display }}{% endif %}</h2>
+  <p>{{ pilot.job.progress.activity.message }}{% if pilot.job.progress.activity.document %} · {{ pilot.job.progress.activity.document }}{% endif %}</p>
+  {% if pilot.job.progress.activity.file %}<p>Archivo: {{ pilot.job.progress.activity.file }} · {{ pilot.job.progress.activity.files_done }} de {{ pilot.job.progress.activity.files_total }} archivos completados.</p>{% endif %}
+  {% if pilot.job.active %}<p>Estado del trabajo: {{ pilot.job.get_status_display }}. El avance y las normas se actualizan automáticamente.</p>{% endif %}
+  {% if heartbeat_age != None %}<p class="muted">Última señal del trabajador: hace {{ heartbeat_age }} s. Última actividad: hace {{ activity_age }} s.</p>{% if pilot.job.active and heartbeat_age >= 60 %}<p role="status">Hace más de un minuto que no recibimos señal. Comprobá el contenedor crawler.</p>{% endif %}{% endif %}
+  {% if pilot.job.error %}<div class="review-errors" role="alert"><h3>El piloto necesita atención</h3><p>{{ pilot.job.error }}</p><p>Los resultados guardados se conservan. Corregí la configuración o esperá a que vuelva el cupo y retomá.</p></div>{% endif %}
+  {% if pilot.status == 'reference' %}
+    <p>Ya están guardadas las fuentes. Iniciá el análisis para recibir las propuestas de las etapas elegidas y revisarlas después.</p>
+    <form method="post">{% csrf_token %}<input type="hidden" name="action" value="analyze_now"><button class="button primary">Analizar ahora</button></form>
+    <details><summary>Preparar una referencia antes de analizar · opcional</summary>
+      <p>Esta opción sirve para medir al modelo contra respuestas revisadas previamente. Requiere resolver los cinco bloques de cada norma. Las decisiones que ya guardaste se conservan aunque elijas analizar ahora.</p>
+      <ul>{% for item in items %}<li><a href="{% url 'review:pilot_item' pilot.pk item.pk %}?reference=1">{{ item.snapshot.identity.type }} {{ item.snapshot.identity.number }}</a> · {{ item.reference_done }}/5 bloques</li>{% endfor %}</ul>
+      <form method="post">{% csrf_token %}<input type="hidden" name="action" value="analyze"><button class="button">Congelar referencia e iniciar análisis</button></form>
+    </details>
+  {% elif pilot.status == 'waiting' %}<form method="post">{% csrf_token %}<input type="hidden" name="action" value="resume"><button class="button primary">Retomar piloto</button></form>{% endif %}
+  {% if pilot.job.active %}<p>El análisis continúa en segundo plano. Cuando haya fichas disponibles, podés abrirlas desde el listado.</p>{% endif %}
+  <p>Etapas elegidas: <strong>{{ processing_label }}</strong>. Laya reutiliza resultados compatibles; si no está elegido, no se ejecuta.</p>
+  {% if 'llm' in selected_stages %}<p class="muted pilot-model">Modelo de esta ejecución: {{ pilot.model }}. Solo endpoints gratuitos compatibles; no hay cambio automático a pago.</p>
+  {% if request_settings.max_tokens %}<p>Límite total de salida: <strong>{{ request_settings.max_tokens }} tokens</strong>.{% if request_settings.reasoning %} Límite de razonamiento solicitado: <strong>{{ request_settings.reasoning.max_tokens }} tokens</strong>.{% endif %}</p>{% endif %}
+  {% if reasoning_omitted %}<p class="muted">El endpoint no anuncia control de razonamiento; ese parámetro no se envió.</p>{% endif %}
+  {% endif %}
+  {% if live_refresh and not pilot.job.active %}<p><a href="{% url 'review:pilot_detail' pilot.pk %}">Ver acciones e informe actualizado</a></p>{% endif %}
+</section>

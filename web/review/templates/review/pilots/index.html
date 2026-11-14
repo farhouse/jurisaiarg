@@ -1,17 +1,15 @@
 {% extends 'base.html' %}{% load static %}
 {% block title %}Pilotos híbridos · JurisAI{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{% static 'review/pilots.css' %}">{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'review/pilots.css' %}"><script src="{% static 'review/pilot_admin.js' %}" defer></script>{% endblock %}
 {% block content %}
 <a class="back" href="{% url 'review:management' %}">Volver a Gestión</a>
 <header class="work-heading"><div><h1>Pilotos híbridos</h1><p>Compará parser, Laya y una LLM sobre las fuentes que ya descargaste.</p></div></header>
 <section class="panel">
   <h2>Analizar un lote descargado</h2>
-  <p>Seleccionaremos hasta 30 normas. Laya y OpenRouter preparan las fichas; después revisás los resultados junto a la fuente.</p>
+  <p>Seleccionaremos hasta 30 normas. Elegí Laya, LLM o ambas etapas. Después revisás los resultados junto a la fuente.</p>
   <form method="post">{% csrf_token %}{{ form.non_field_errors }}{{ form.submission_id }}{{ form.submission_id.errors }}
     <p>{{ form.run.label_tag }}{{ form.run }}{{ form.run.errors }}</p>
-    <div class="pilot-field">{{ form.model.label_tag }}{{ form.model }}{{ form.model.errors }}<p class="muted" id="id_model_helptext">{{ form.model.help_text }}</p></div>
-    {% if form.catalog_warning %}<p role="status">{{ form.catalog_warning }}</p>{% endif %}
-    {% include 'review/pilots/token_fields.html' with budget_form=form %}
+    {% include 'review/pilots/execution_fields.html' with execution_form=form %}
     <details class="pilot-advanced"><summary>Evaluación avanzada · opcional</summary><p>{{ form.reference_required }} {{ form.reference_required.label_tag }}</p><p class="muted">{{ form.reference_required.help_text }} Solo necesitás esta opción para comparar contra una referencia revisada de antemano.</p></details>
     <p><button class="button primary">Analizar muestra del lote</button></p>
   </form>

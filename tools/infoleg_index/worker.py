@@ -127,14 +127,17 @@ def process_next(con, dsn):
 
 
 def process_pilot(con, dsn, job):
+    from pilot_contract import processing_stages
     # Rama aislada antes de crear/modificar crawl_runs o llamar a parsers con persistencia.
-    pilot_id, phase = con.execute('SELECT id,phase FROM analysis_pilots WHERE job_id=%s', (job['id'],)).fetchone()
+    pilot_id, phase, config = con.execute('SELECT id,phase,config FROM analysis_pilots WHERE job_id=%s', (job['id'],)).fetchone()
     con.execute("""UPDATE crawl_jobs SET status='running',started_at=now(),finished_at=NULL,
         heartbeat_at=now(),last_activity_at=now(),error='' WHERE id=%s""", (job['id'],))
     con.commit()
     try:
         with JobActivity(dsn, job['id'], heartbeat=True) as report:
-            stages = ['prepare'] if phase == 'prepare' else ['preflight', 'laya', 'analyze']
+            selected = processing_stages(config)
+            analysis = (['preflight'] if 'llm' in selected else []) + (['laya'] if 'laya' in selected else []) + (['analyze'] if 'llm' in selected else [])
+            stages = ['prepare'] if phase == 'prepare' else analysis
             for stage in stages:
                 con.execute('UPDATE crawl_jobs SET stage=%s WHERE id=%s', ('pilot_' + stage, job['id']))
                 con.commit()
@@ -154,7 +157,10 @@ def process_pilot(con, dsn, job):
                             child.kill()
                             child.wait()
                 if stage == 'prepare' and con.execute('SELECT phase FROM analysis_pilots WHERE id=%s', (pilot_id,)).fetchone()[0] == 'analyze':
-                    stages.extend(['preflight', 'laya', 'analyze'])
+                    stages.extend(analysis)
+        if 'llm' not in selected and con.execute('SELECT phase FROM analysis_pilots WHERE id=%s',(pilot_id,)).fetchone()[0]=='analyze':
+            con.execute("UPDATE analysis_pilots SET status='complete' WHERE id=%s",(pilot_id,))
+        con.execute("UPDATE crawl_jobs SET progress=progress - 'pilot_current' WHERE id=%s",(job['id'],))
         con.execute("UPDATE crawl_jobs SET status='done',stage='finished',finished_at=now() WHERE id=%s", (job['id'],))
     except BaseException as exc:
         con.rollback()

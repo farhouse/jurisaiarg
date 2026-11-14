@@ -1,0 +1,11 @@
+<fieldset class="pilot-stages">
+  <legend>{{ execution_form.stages.label }}</legend>
+  {{ execution_form.stages }}{{ execution_form.stages.errors }}
+  <p class="muted">{{ execution_form.stages.help_text }}</p>
+  <p class="muted">Laya reutiliza análisis compatibles y procesa los faltantes. Si desmarcás Laya, se conservan sus resultados guardados y no se lo ejecuta.</p>
+</fieldset>
+<div data-llm-options>
+  <div class="pilot-field">{{ execution_form.model.label_tag }}{{ execution_form.model }}{{ execution_form.model.errors }}<p class="muted" id="id_model_helptext">{{ execution_form.model.help_text }}</p></div>
+  {% if execution_form.catalog_warning %}<p role="status">{{ execution_form.catalog_warning }}</p>{% endif %}
+  {% include 'review/pilots/token_fields.html' with budget_form=execution_form %}
+</div>

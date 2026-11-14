@@ -175,7 +175,7 @@ class PilotIntegrationTest(unittest.TestCase):
             meta = {'request_id':'one','requested':True,'usage':{'total_tokens':100,'cost':0},'seconds':1}
             frozen={'max_tokens':16384,'reasoning':{'max_tokens':2048}}
             con.execute("UPDATE analysis_pilots SET config=config || %s WHERE id=%s",(Jsonb({'endpoint':{'context_length':1000000},'request_settings':frozen}),pk))
-            con.execute("UPDATE analysis_pilot_items SET metadata=%s WHERE id=%s",(Jsonb({'reference_authors':{'summary':'first'},'reference_decisions':{'summary':'confirmed'}}),item))
+            con.execute("UPDATE analysis_pilot_items SET metadata=%s WHERE id=%s",(Jsonb({'reference_authors':{'summary':'first'},'reference_decisions':{'summary':'confirmed'},'laya_reused':True,'laya_source_item_id':123}),item))
             con.commit()
             failed={'requested':True,'finish_reason':'length','usage':{'completion_tokens':8192,'reasoning_tokens':8192}}
             with patch('pilot.infer',side_effect=pilot.PilotError('Límite de salida.',failed)),self.assertRaises(pilot.PilotError):
@@ -200,6 +200,7 @@ class PilotIntegrationTest(unittest.TestCase):
             self.assertEqual(metadata['reference_authors']['summary'],'second')
             self.assertEqual(metadata['reference_decisions']['summary'],'legal')
             self.assertEqual(metadata['attempts'],[])
+            self.assertNotIn('laya_source_item_id',metadata)
             # Otro presupuesto no reutiliza una respuesta producida con ajustes distintos.
             con.execute("UPDATE analysis_pilot_items SET status='pending',result='{}' WHERE pilot_id=%s",(pk2,))
             con.execute("UPDATE analysis_pilots SET config=jsonb_set(config,'{endpoint,request_settings}',%s) WHERE id=%s",
@@ -222,6 +223,29 @@ class PilotIntegrationTest(unittest.TestCase):
                 self.assertTrue(worker.process_pilot(con,dsn,{'id':job2}))
             self.assertEqual(stages,['prepare','preflight','laya','analyze'])
             self.assertEqual(con.execute('SELECT phase FROM analysis_pilots WHERE id=%s',(pk2,)).fetchone()[0],'analyze')
+            for selected,expected in ((['llm'],['preflight','analyze']),(['laya'],['laya']),(['laya','llm'],['preflight','laya','analyze'])):
+                con.execute("UPDATE analysis_pilots SET config=config || %s WHERE id=%s",(Jsonb({'stages':selected}),pk2));con.commit()
+                stages=[]
+                with patch('worker.subprocess.Popen',side_effect=lambda args,**kw: (stages.append(args[2]) or Mock(wait=Mock(return_value=0),poll=Mock(return_value=0)))):
+                    worker.process_pilot(con,dsn,{'id':job2})
+                self.assertEqual(stages,expected)
+            # Laya se comparte entre ejecuciones compatibles sin cargar el modelo.
+            import sys
+            from try_laya import MODEL_REVISION
+            from topics import VERSION as TOPICS_VERSION
+            laya={'revision':MODEL_REVISION,'topics_version':TOPICS_VERSION,'relations':[],'topics':{}}
+            con.execute('UPDATE analysis_pilot_items SET laya=%s WHERE id=%s',(Jsonb(laya),item))
+            con.execute("UPDATE analysis_pilot_items SET laya='{}',snapshot=%s WHERE pilot_id=%s",(Jsonb(snapshot),pk2));con.commit()
+            with patch.dict(sys.modules,{'laya':None}):
+                pilot.laya_stage(con,pk2,lambda *a,**k:None)
+            reused=con.execute('SELECT laya,metadata FROM analysis_pilot_items WHERE pilot_id=%s',(pk2,)).fetchone()
+            self.assertEqual(reused[0],laya);self.assertTrue(reused[1]['laya_reused'])
+            # Una entrada distinta no debe heredar ese resultado, aun con fingerprint viejo.
+            changed=copy.deepcopy(snapshot);changed['units'][0]['text']+=' Otro contexto.'
+            con.execute("UPDATE analysis_pilot_items SET laya='{}',snapshot=%s WHERE pilot_id=%s",(Jsonb(changed),pk2));con.commit()
+            with patch.dict(sys.modules,{'laya':None}):
+                pilot.laya_stage(con,pk2,lambda *a,**k:None)
+            self.assertIn('error',con.execute('SELECT laya FROM analysis_pilot_items WHERE pilot_id=%s',(pk2,)).fetchone()[0])
             self.assertEqual(con.execute('SELECT count(*) FROM analysis_pilot_evaluations WHERE item_id=%s',(item,)).fetchone()[0],0)
             # Ni siquiera la recuperación de un piloto interrumpido cambia su lote de origen.
             con.execute("UPDATE crawl_jobs SET status='running' WHERE id=%s",(job2,));con.commit()

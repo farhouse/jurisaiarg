@@ -32,7 +32,7 @@ usar el Compose actualizado y recrear `init`, `crawler` y `web`.
 La clave se pasa solamente al crawler. Ver la [guía del piloto](docs/procesamiento-hibrido.md#uso-en-dockhand).
 El administrador elige el modelo gratuito y los límites de salida y razonamiento
 en **Gestión → Pilotos**; también puede crear otra ejecución de una muestra ya
-preparada con otro modelo o presupuesto de tokens.
+preparada con otro modelo o presupuesto de tokens. Las casillas **Laya** y **LLM** permiten ejecutar una sola etapa o ambas; repetir una muestra ofrece solo LLM por defecto y conserva Laya guardado. El detalle actualiza los estados de cada norma en segundo plano, sin recargar la página.
 
 **Validar** ofrece tarjetas de temas y resúmenes. El administrador habilita las
 fichas terminadas desde un piloto; las respuestas se registran separadas de los

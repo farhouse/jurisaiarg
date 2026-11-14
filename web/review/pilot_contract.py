@@ -8,6 +8,17 @@ PROMPT_VERSION = 'norm-context-v1'
 DEFAULT_MODEL = 'nvidia/nemotron-3.5-super-vl:free'
 DEFAULT_MAX_TOKENS = 32768
 DEFAULT_REASONING_TOKENS = 4096
+STAGE_CHOICES = [('laya', 'Laya · contrastar efectos y probar materias'),
+                 ('llm', 'LLM · generar la ficha con OpenRouter')]
+
+
+def processing_stages(config):
+    stages = config.get('stages', ['laya', 'llm'])
+    if not isinstance(stages, list) or not stages or any(s not in ('laya','llm') for s in stages) or len(set(stages))!=len(stages):
+        raise ValueError('Seleccioná Laya, LLM o ambas etapas.')
+    return [s for s in ('laya','llm') if s in stages]
+
+
 MATTERS = ['Civil y comercial', 'Laboral', 'Familia', 'Penal', 'Administrativo',
            'Tributario', 'Constitucional', 'Seguridad social', 'Ambiental', 'Consumidor']
 BLOCKS = {'summary': 'Resumen', 'matters': 'Materias', 'concepts': 'Conceptos',
