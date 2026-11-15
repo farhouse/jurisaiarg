@@ -1,0 +1,8 @@
+{% if stage_summary %}<section class="pilot-stage-summary" aria-label="Avance por etapa"><h2>Avance del grupo</h2>
+<p>Estado del último análisis disponible de cada norma y etapa. Los resultados archivados quedan fuera de estos totales.</p>
+{% for row in stage_summary %}<div class="pilot-stage-row"><h3>{{ row.label }}</h3>
+<p><strong>{{ row.done }}</strong> {% if row.key == 'llm' %}fichas listas{% else %}terminadas{% endif %} · <strong>{{ row.pending }}</strong> pendientes · <strong>{{ row.error }}</strong> con error · <strong>{{ row.active }}</strong> en cola o en curso</p>
+{% if selection_enabled %}<div class="pilot-stage-actions"><button type="button" class="button" data-select-stage="{{ row.key }}" data-select-state="pending" {% if not row.pending or row.reserved %}disabled{% endif %} aria-label="Seleccionar pendientes de {{ row.label }}">Seleccionar pendientes</button><button type="button" class="button" data-select-stage="{{ row.key }}" data-select-state="error" {% if not row.error or row.reserved %}disabled{% endif %} aria-label="Seleccionar con error de {{ row.label }}">Seleccionar con error</button></div>{% endif %}
+{% if row.reserved %}<p>{{ row.label }} tiene un trabajo activo. <a href="{% url 'review:pilot_detail' row.reserved.pk %}">Abrir análisis {{ row.reserved.pk }}</a>{% if row.reserved.job.cancel_requested_at %} · Detención solicitada{% endif %}</p>{% endif %}
+</div>{% endfor %}
+{% if selection_enabled %}<p class="muted">Estos botones seleccionan las normas y marcan solo su etapa. Podés combinar Laya y LLM en las opciones del bloque.</p>{% endif %}</section>{% endif %}

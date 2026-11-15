@@ -1,0 +1,3 @@
+{% if pilot.archived_at %}<form method="post" action="{% url 'review:pilot_archive' pilot.pk %}">{% csrf_token %}<button class="button" name="action" value="restore" aria-label="Restaurar piloto {{ pilot.pk }}">Restaurar</button></form>
+{% elif pilot.job.active %}{% if pilot.job.cancel_requested_at %}<span>Detención solicitada</span>{% else %}<form method="post" action="{% url 'review:crawl_stop' pilot.job_id %}">{% csrf_token %}<button class="button" aria-label="Detener trabajo del piloto {{ pilot.pk }}">Detener</button></form>{% endif %}
+{% else %}<form method="post" action="{% url 'review:pilot_archive' pilot.pk %}">{% csrf_token %}<button class="button" name="action" value="archive" aria-label="Archivar piloto {{ pilot.pk }}">Archivar</button></form>{% endif %}

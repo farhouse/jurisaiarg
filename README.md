@@ -41,6 +41,11 @@ admiten dos trabajos activos de la misma etapa sobre un grupo, incluso con
 solicitudes simultáneas. Ver los detalles en la guía del piloto. Esta actualización
 requiere recrear `init`, `crawler` y `web` con la misma versión para aplicar el esquema.
 
+Cada grupo muestra el avance separado de Laya y LLM y permite seleccionar sus
+pendientes o errores para el próximo bloque. Los análisis quedan en un historial
+desplegable con sus etapas reales y cantidad de normas. El grupo se actualiza
+mientras trabajan sus bloques sin perder la selección.
+
 **Validar** ofrece tarjetas de temas y resúmenes. El administrador habilita las
 fichas terminadas desde un piloto; las respuestas se registran separadas de los
 datos oficiales y de los votos históricos. Gestión incluye las respuestas por ley

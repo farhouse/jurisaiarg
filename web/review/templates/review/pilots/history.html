@@ -1,0 +1,5 @@
+{% if executions %}<details class="pilot-history" data-details-key="history-{{ pilot.pk }}"><summary>Historial de análisis · {{ executions|length }}</summary>
+<ul>{% for execution in executions %}<li>
+<div><a href="{% url 'review:pilot_detail' execution.pk %}">Análisis {{ execution.pk }} · {{ execution.processing_label }}</a><p>{{ execution.norm_count }} norma{{ execution.norm_count|pluralize }} · {{ execution.status_label }} · {{ execution.created_at|date:'d/m/Y H:i' }}</p>{% if execution.uses_llm %}<small class="pilot-model">{{ execution.model }}</small>{% endif %}</div>
+{% include 'review/pilots/actions.html' with pilot=execution %}
+</li>{% endfor %}</ul></details>{% endif %}

@@ -10,7 +10,7 @@ from django import forms
 from django.contrib import messages
 from django.core.cache import cache
 from django.db import transaction
-from django.db.models import Value,TextField
+from django.db.models import Value,TextField,Count,Q
 from django.db.models.functions import Replace
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -218,8 +218,18 @@ def index(request):
 
 def render_index(request, form, group_form, conflict=None, status=200):
     archived = request.GET.get('archivados')=='1'
-    pilots = AnalysisPilot.objects.filter(archived_at__isnull=not archived).select_related('job','crawl_run')
-    return render(request,'review/pilots/index.html',{'form':form,'group_form':group_form,'pilots':pilots[:50],
+    pilots = AnalysisPilot.objects.filter(archived_at__isnull=not archived).select_related('job','crawl_run').annotate(norm_count=Count('items')).order_by('-id')
+    if not archived:
+        parent_ids=list(pilots.values_list('pk',flat=True))
+        pilots=pilots.filter(~Q(config__has_key='group_pilot_id') | ~Q(config__group_pilot_id__in=parent_ids))
+    pilots=list(pilots[:50])
+    histories={p.pk:[] for p in pilots}
+    if not archived:
+        for child in AnalysisPilot.objects.filter(config__group_pilot_id__in=list(histories),archived_at__isnull=True).select_related('job','crawl_run').annotate(norm_count=Count('items')).order_by('-id'):
+            histories[child.config['group_pilot_id']].append(child)
+    for pilot in pilots:
+        pilot.executions=histories[pilot.pk]
+    return render(request,'review/pilots/index.html',{'form':form,'group_form':group_form,'pilots':pilots,
         'show_archived':archived,'conflict_pilot':conflict},status=status)
 
 
@@ -421,11 +431,15 @@ def detail(request, pk):
     data['published_cards']=ReviewCard.objects.filter(item__pilot=pilot,active=True).count()
     now = timezone.now()
     decorate_progress(pilot,data['items'])
+    executions=list(AnalysisPilot.objects.filter(config__group_pilot_id=pilot.pk,archived_at__isnull=True).select_related('job','crawl_run').annotate(norm_count=Count('items')).order_by('-id'))
     if pilot.config.get('group'):
         decorate_group(pilot,data['items'])
+        data['stage_summary']=stage_summary(data['items'],executions)
     selected_ids = model_form['items'].value() if model_form is not None else []
     data['selected_item_ids'] = [int(v) for v in selected_ids or [] if str(v).isdigit()]
-    data['executions'] = AnalysisPilot.objects.filter(config__group_pilot_id=pilot.pk,archived_at__isnull=True).select_related('job') if pilot.config.get('group') else []
+    data['executions']=executions
+    data['selection_enabled']=model_form is not None
+    data['live_active']=not pilot.archived_at and (pilot.job.active or any(e.job.active for e in executions))
     data.update(pilot=pilot,error=error,conflict_pilot=conflict,blocks=BLOCKS,model_form=model_form,request_settings=requested,
         selected_stages=processing_stages(pilot.config),processing_label=' + '.join('Laya' if s=='laya' else 'LLM' for s in processing_stages(pilot.config)),
         reasoning_omitted=bool(effective) and 'reasoning' not in effective,
@@ -474,6 +488,12 @@ def decorate_progress(pilot, items):
             item.laya_state = 'Error guardado · Laya no solicitada'
         item.llm_state = ('Reutilizada' if item.metadata.get('reused') else 'Ficha lista') if item.status=='done' else (
             'Requiere atención' if item.error else 'Pendiente' if 'llm' in stages else 'No solicitada')
+        item.laya_code='error' if item.laya.get('error') else 'done' if item.laya else 'pending'
+        item.llm_code='done' if item.status=='done' else 'error' if item.error else 'pending'
+        for stage in stages:
+            if pilot.job.active and getattr(item,stage+'_code')=='pending':
+                setattr(item,stage+'_code','active')
+                setattr(item,stage+'_state','En cola' if pilot.job.status=='queued' else 'En curso')
         item.processing_now = current.get('item_id')==item.pk
         if item.processing_now:
             if current.get('stage')=='laya': item.laya_state='Procesando ahora'
@@ -482,27 +502,41 @@ def decorate_progress(pilot, items):
 
 def decorate_group(pilot, items):
     children = AnalysisPilotItem.objects.filter(pilot__config__group_pilot_id=pilot.pk,pilot__archived_at__isnull=True).select_related('pilot__job').order_by('-pilot_id','-pk')
-    laya, llm, latest = {}, {}, {}
+    laya, cached_laya, llm, latest = {}, {}, {}, {}
     for child in children:
         decorate_progress(child.pilot,[child])
         latest.setdefault(child.norm_id,child)
-        if 'laya' in processing_stages(child.pilot.config) or child.laya:
+        if 'laya' in processing_stages(child.pilot.config):
             laya.setdefault(child.norm_id,child)
+        elif child.laya:
+            cached_laya.setdefault(child.norm_id,child)
         if 'llm' in processing_stages(child.pilot.config):
             llm.setdefault(child.norm_id,child)
     for item in items:
         item.laya_state=item.llm_state='Sin analizar'
+        item.laya_code=item.llm_code='pending'
         item.latest_block=latest.get(item.norm_id)
-        if item.norm_id in laya:
-            child=laya[item.norm_id]
+        child=laya.get(item.norm_id) or cached_laya.get(item.norm_id)
+        if child:
             item.laya,item.laya_state=child.laya,child.laya_state
+            item.laya_code=child.laya_code
             item.processing_now=item.processing_now or child.processing_now
         if item.norm_id in llm:
             child=llm[item.norm_id]
             item.status,item.llm_state=child.status,child.llm_state
+            item.llm_code=child.llm_code
             item.result_pilot_id,item.result_item_id=child.pilot_id,child.pk
             item.error=child.error
             item.processing_now=item.processing_now or child.processing_now
+
+
+def stage_summary(items, executions):
+    rows=[]
+    for stage,label in (('laya','Laya'),('llm','LLM')):
+        counts={state:sum(getattr(item,stage+'_code')==state for item in items) for state in ('done','pending','error','active')}
+        reserved=next((e for e in executions if e.job.active and stage in processing_stages(e.config)),None)
+        rows.append({'key':stage,'label':label,**counts,'reserved':reserved})
+    return rows
 
 
 @staff_required
@@ -513,10 +547,14 @@ def progress(request, pk):
     decorate_progress(pilot,items)
     if pilot.config.get('group'):
         decorate_group(pilot,items)
+    executions=list(AnalysisPilot.objects.filter(config__group_pilot_id=pilot.pk,archived_at__isnull=True).select_related('job','crawl_run').annotate(norm_count=Count('items')).order_by('-id'))
+    active=not pilot.archived_at and (pilot.job.active or any(e.job.active for e in executions))
     now = timezone.now()
     context = {'pilot':pilot,'items':items,'selected_stages':processing_stages(pilot.config),
         'processing_label':' + '.join('Laya' if s=='laya' else 'LLM' for s in processing_stages(pilot.config)),
-        'request_settings':pilot.config.get('request_settings',{}),'live_refresh':True,
+        'request_settings':pilot.config.get('request_settings',{}),'live_refresh':True,'executions':executions,
+        'selection_enabled':request.GET.get('selection')=='1' and bool(items) and not pilot.job.active and not pilot.archived_at,
+        'stage_summary':stage_summary(items,executions) if pilot.config.get('group') else [],
         'heartbeat_age':int((now-pilot.job.heartbeat_at).total_seconds()) if pilot.job.heartbeat_at else None,
         'activity_age':int((now-pilot.job.last_activity_at).total_seconds()) if pilot.job.last_activity_at else None}
     for item in items:
@@ -524,9 +562,10 @@ def progress(request, pk):
         item.result_done = sum(r.decision!='pending' for b,r in latest_reviews(item,'result',request.user.pk).items() if b in BLOCKS and b!='articles')
     effective = pilot.config.get('endpoint',{}).get('request_settings',{})
     context['reasoning_omitted'] = bool(effective) and 'reasoning' not in effective
-    response = JsonResponse({'active':pilot.job.active,'status':pilot.status_label,
+    response = JsonResponse({'active':active,'status':pilot.status_label,
         'progress_html':render_to_string('review/pilots/progress.html',context,request=request),
-        'sample_html':render_to_string('review/pilots/sample.html',context,request=request)})
+        'sample_html':render_to_string('review/pilots/sample.html',context,request=request),
+        'history_html':render_to_string('review/pilots/history.html',context,request=request)})
     response['Cache-Control']='no-store'
     return response
 

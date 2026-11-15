@@ -26,12 +26,11 @@
 <section class="panel table-panel"><div class="pilot-list-heading"><h2>{% if show_archived %}Pilotos archivados{% else %}Pilotos preparados{% endif %}</h2><a href="{% url 'review:pilots' %}{% if not show_archived %}?archivados=1{% endif %}">{% if show_archived %}Ver pilotos preparados{% else %}Ver archivados{% endif %}</a></div>
 <p>{% if show_archived %}Podés restaurar cada piloto. Sus tarjetas seguirán retiradas hasta que las habilites.{% else %}Archivá los trabajos viejos para quitarlos de este listado. Se conservan sus resultados y respuestas. Detené primero los que estén activos.{% endif %}</p>
 <div class="table-scroll"><table class="pilot-list">
-  <thead><tr><th>Piloto, lote y modelo</th><th>Estado</th><th>Creado</th><th>Acción</th></tr></thead><tbody>
-  {% for pilot in pilots %}<tr><td><a href="{% url 'review:pilot_detail' pilot.pk %}">{% if pilot.config.group %}Grupo{% else %}Análisis{% endif %} {{ pilot.pk }} · {{ pilot.crawl_run.label }}</a><small class="pilot-model">{% if pilot.config.group %}{{ pilot.config.norm_ids|length }} normas · elegís cuáles analizar{% else %}{{ pilot.model }}{% endif %}</small></td><td data-label="Estado">{{ pilot.status_label }}</td><td data-label="Creado">{{ pilot.created_at|date:'d/m/Y H:i' }}</td><td>
-  {% if show_archived %}<form method="post" action="{% url 'review:pilot_archive' pilot.pk %}">{% csrf_token %}<button class="button" name="action" value="restore" aria-label="Restaurar piloto {{ pilot.pk }}">Restaurar</button></form>
-  {% elif pilot.job.active %}{% if pilot.job.cancel_requested_at %}<span>Detención solicitada</span>{% else %}<form method="post" action="{% url 'review:crawl_stop' pilot.job_id %}">{% csrf_token %}<button class="button" aria-label="Detener trabajo del piloto {{ pilot.pk }}">Detener</button></form>{% endif %}
-  {% else %}<form method="post" action="{% url 'review:pilot_archive' pilot.pk %}">{% csrf_token %}<button class="button" name="action" value="archive" aria-label="Archivar piloto {{ pilot.pk }}">Archivar</button></form>{% endif %}
+  <thead><tr><th>Grupo o muestra</th><th>Estado</th><th>Creado</th><th>Acción</th></tr></thead><tbody>
+  {% for pilot in pilots %}<tr><td><a href="{% url 'review:pilot_detail' pilot.pk %}">{% if pilot.config.group %}Grupo{% else %}Análisis{% endif %} {{ pilot.pk }} · {{ pilot.crawl_run.label }}</a><small class="pilot-model">{% if pilot.config.group %}{{ pilot.config.norm_ids|length }} norma{{ pilot.config.norm_ids|length|pluralize }} · elegís cuáles analizar{% else %}{{ pilot.processing_label }} · {{ pilot.norm_count }} norma{{ pilot.norm_count|pluralize }}{% endif %}</small>{% if pilot.uses_llm %}<small class="pilot-model">{{ pilot.model }}</small>{% endif %}</td><td data-label="Estado">{{ pilot.status_label }}</td><td data-label="Creado">{{ pilot.created_at|date:'d/m/Y H:i' }}</td><td>
+  {% include 'review/pilots/actions.html' %}
   </td></tr>
+  {% if pilot.executions %}<tr class="pilot-history-row"><td colspan="4">{% include 'review/pilots/history.html' with executions=pilot.executions %}</td></tr>{% endif %}
   {% empty %}<tr><td colspan="4">{% if show_archived %}No hay pilotos archivados.{% else %}Todavía no hay pilotos. Elegí un lote descargado para comenzar.{% endif %}</td></tr>{% endfor %}
   </tbody></table></div></section>
 {% endblock %}

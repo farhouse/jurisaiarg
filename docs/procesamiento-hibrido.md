@@ -374,6 +374,25 @@ fallo de conexión también conserva el trabajo previo.
    fallido conserva las respuestas anteriores; **Retomar piloto** reutiliza las
    tareas terminadas cuando coinciden contenido y versiones.
 
+**Avance y selección rápida por grupo:** el grupo cuenta cada norma una vez por
+etapa, usando el último análisis no archivado de esa etapa. Distingue resultados
+terminados, pendientes, con error y en cola o en curso. Una copia de Laya en una
+ejecución de LLM no oculta un error de un análisis explícito de Laya más reciente.
+Los botones **Seleccionar pendientes** y **Seleccionar con error** de cada etapa
+marcan sus normas y eligen solo esa etapa para el próximo bloque. Después se puede
+ajustar la selección o combinar etapas. Una etapa reservada por un trabajo activo
+deshabilita esos atajos y enlaza el trabajo existente. La selección manual conserva
+el control; la exclusión de duplicados sigue verificándose al enviar.
+
+El avance del grupo y su historial se actualizan mientras trabajen sus bloques,
+conservando selección, foco de teclado, detalles abiertos y desplazamiento de la
+tabla. El listado principal agrupa los bloques bajo su muestra y ofrece un
+**Historial de análisis** desplegable, del más reciente al más antiguo. Los análisis
+sin grupo o con un padre archivado permanecen accesibles como filas propias. Cada
+ejecución muestra las etapas solicitadas, cantidad de normas y estado; solo las que
+incluyen LLM muestran un modelo de OpenRouter. Los archivados siguen disponibles
+en su vista separada y los enlaces históricos se conservan.
+
 **Detener y limpiar trabajos:** el listado de Pilotos y el detalle de cada trabajo
 ofrecen **Detener trabajo**. En cola se retira inmediatamente; en curso muestra
 **Deteniendo…** hasta que el trabajador confirme **Detenido**. El supervisor

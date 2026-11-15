@@ -429,3 +429,62 @@ class PilotsTest(TransactionTestCase):
         response=self.client.post(f'/gestion/pilotos/{old.pk}/',{'action':'resume'})
         self.assertContains(response,f'Abrir análisis {active.pk}',status_code=409)
         old_job.refresh_from_db();self.assertEqual(old_job.status,'failed')
+
+    def test_group_summary_uses_each_stage_once_and_keeps_selection_during_live_work(self):
+        from django.template.loader import render_to_string
+        _,group,items=self.ready_group()
+        def execution(stages,source_items,**fields):
+            job=CrawlJob.objects.create(submission_id=uuid.uuid4(),start_id=1,end_id=2,mode='pilot',status='done',crawl_run=group.crawl_run,requested_by='test',created_at=timezone.now())
+            pilot=AnalysisPilot.objects.create(job=job,crawl_run=group.crawl_run,model=DEFAULT_MODEL,status='complete',phase='analyze',config={'group_pilot_id':group.pk,'stages':stages},created_at=timezone.now())
+            for source in source_items:
+                AnalysisPilotItem.objects.create(pilot=pilot,norm_id=source.norm_id,snapshot=source.snapshot,reference=source.reference,split=source.split,fingerprint=source.fingerprint,**fields)
+            return pilot
+        cached={'revision':'compatible','relations':[]}
+        old=execution(['laya'],items,laya=cached)
+        failed=execution(['laya'],items[:1],laya={'error':'Fallo de prueba'})
+        # LLM sola no debe ocultar el último error de Laya con una copia anterior.
+        llm=execution(['llm'],items[:1],laya=cached,result=empty_result(),status='done')
+        before=list(group.items.values())
+        page=self.client.get(f'/gestion/pilotos/{group.pk}/')
+        counts={row['key']:row for row in page.context['stage_summary']}
+        self.assertEqual([e.pk for e in page.context['executions']],[llm.pk,failed.pk,old.pk])
+        self.assertEqual([counts['laya'][k] for k in ('done','pending','error','active')],[1,0,1,0])
+        self.assertEqual([counts['llm'][k] for k in ('done','pending','error','active')],[1,1,0,0])
+        self.assertContains(page,'data-laya="error" data-llm="done"')
+        self.assertContains(page,'Seleccionar con error de Laya')
+        old_view=next(e for e in page.context['executions'] if e.pk==old.pk)
+        history=render_to_string('review/pilots/history.html',{'pilot':group,'executions':[old_view]})
+        self.assertIn('Laya',history);self.assertNotIn(DEFAULT_MODEL,history)
+        self.assertIn('2 normas',history)
+        active=execution(['llm'],items[1:]);active.job.status='queued';active.job.save()
+        live=self.client.get(f'/gestion/pilotos/{group.pk}/avance/?selection=1').json()
+        self.assertTrue(live['active'])
+        self.assertIn('En cola',live['sample_html'])
+        self.assertIn('name="items"',live['sample_html'])
+        self.assertIn('1</strong> en cola o en curso',live['sample_html'])
+        self.assertIn(f'Abrir análisis {active.pk}',live['sample_html'])
+        self.assertIn('Historial de análisis',live['history_html'])
+        self.assertNotIn('name="items"',self.client.get(f'/gestion/pilotos/{group.pk}/avance/').json()['sample_html'])
+        active.job.status='done';active.job.save()
+        self.assertFalse(self.client.get(f'/gestion/pilotos/{group.pk}/avance/').json()['active'])
+        self.client.post(f'/gestion/pilotos/{failed.pk}/archivo/',{'action':'archive'})
+        counts=self.client.get(f'/gestion/pilotos/{group.pk}/').context['stage_summary']
+        self.assertEqual([counts[0][k] for k in ('done','pending','error','active')],[2,0,0,0])
+        self.assertEqual(list(group.items.values()),before)
+
+    def test_index_groups_children_but_keeps_archived_parent_and_legacy_work_findable(self):
+        _,group,items=self.ready_group()
+        response=self.client.post(f'/gestion/pilotos/{group.pk}/',{'action':'compare_model','submission_id':uuid.uuid4(),'stages':['laya'],'items':[items[0].pk]})
+        child=AnalysisPilot.objects.exclude(pk=group.pk).get()
+        page=self.client.get('/gestion/pilotos/')
+        self.assertEqual([p.pk for p in page.context['pilots']],[group.pk])
+        self.assertEqual([p.pk for p in page.context['pilots'][0].executions],[child.pk])
+        self.assertContains(page,'Historial de análisis · 1')
+        self.assertContains(page,f'Análisis {child.pk} · Laya')
+        child.job.status='cancelled';child.job.save();child.status='cancelled';child.save()
+        self.client.post(f'/gestion/pilotos/{group.pk}/archivo/',{'action':'archive'})
+        self.assertEqual([p.pk for p in self.client.get('/gestion/pilotos/').context['pilots']],[child.pk])
+        self.assertContains(self.client.get('/gestion/pilotos/?archivados=1'),f'Grupo {group.pk}')
+        # Los análisis anteriores sin group_pilot_id conservan su propia fila.
+        child.config.pop('group_pilot_id');child.save()
+        self.assertEqual([p.pk for p in self.client.get('/gestion/pilotos/').context['pilots']],[child.pk])

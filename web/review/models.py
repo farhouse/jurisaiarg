@@ -424,6 +424,17 @@ class AnalysisPilot(models.Model):
                 'selection':'Listo para elegir normas', 'running':'Analizando', 'waiting':'Requiere atención',
                 'cancelled':'Detenido', 'complete':'Análisis terminado'}.get(self.status, self.status)
 
+    @property
+    def processing_label(self):
+        from .pilot_contract import processing_stages
+        return 'Fuentes y reglas' if self.config.get('group') else ' + '.join(
+            'Laya' if stage=='laya' else 'LLM' for stage in processing_stages(self.config))
+
+    @property
+    def uses_llm(self):
+        from .pilot_contract import processing_stages
+        return not self.config.get('group') and 'llm' in processing_stages(self.config)
+
 
 class AnalysisPilotItem(models.Model):
     pilot = models.ForeignKey(AnalysisPilot, models.DO_NOTHING, related_name='items')
